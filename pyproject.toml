@@ -1,0 +1,19 @@
+[project]
+name = "reasoning-reciting-probing"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "j.e.holshuijsen@student.vu.nl"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "transformers (>=4.50.2,<5.0.0)",
+    "torch (>=2.6.0,<3.0.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+package-mode = false
+
