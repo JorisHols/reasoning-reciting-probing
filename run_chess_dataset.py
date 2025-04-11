@@ -49,23 +49,23 @@ def main(model_name: str = "llama3-8b-instruct"):
             output_dir = f"chess/output/{exp}/{model_name.replace('models/', '')}_0cot{cot}"
             pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
             for mode in ["real_world", "counter_factual"]:
+                # Control experiment, should we include?
                 pieces = ["white bishop", "black bishop", "white knight", "black knight"]
                 templatized = [templatize(mode, piece, is_control=True) for piece in pieces]
                
                 # TODO: Replace query batch funciton
-                responses = query_batch(templatized, model_name, temperature=0.1, n=15)
+                responses = query_with_hidden_states(templatized, model_name, temperature=0.1, n=15)
                 output_file = os.path.join(output_dir, f"{mode}_control.txt")
-                with open(output_file, "w") as log:
-                    for piece, response_batch in zip(pieces, responses, strict=True):
-                        for response in response_batch:
-                            log.write(f"{piece} *\t{escape(response)}\n")
+                # with open(output_file, "w") as log:
+                #     for piece, response_batch in zip(pieces, responses, strict=True):
+                #         for response in response_batch:
+                #             log.write(f"{piece} *\t{escape(response)}\n")
                 # continue
                 for real_world_legal in [True, False]:
                     for counter_factual_legal in [True, False]:
                         data_file = \
                             f"{data_dir}/{mode}_{'T' if real_world_legal else 'F'}_{'T' if counter_factual_legal else 'F'}.txt"
-                        output_file = \
-                            f"{output_dir}/{mode}_{'T' if real_world_legal else 'F'}_{'T' if counter_factual_legal else 'F'}.txt"
+
                         if not os.path.exists(data_file):
                             raise RuntimeError(f"data file {data_file} doesn't exist")
 
