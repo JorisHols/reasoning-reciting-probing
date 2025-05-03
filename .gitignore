@@ -175,3 +175,11 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Jupyter notebooks
+*.ipynb
+notebooks/
+
+# Large data files
+*.arrow
+*.zip
+
