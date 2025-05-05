@@ -39,12 +39,17 @@ def parse_args():
         choices=["chess", "kk"],
         help="Type of dataset to use for probing"
     )
-    
+
+    parser.add_argument(
+        "--input_path",
+        type=str,
+        help="Path to the input dataset"
+    )
     # Output parameters
     parser.add_argument(
-        "--output_dir",
+        "--output_path",
         type=str,
-        default="output",
+        # No default, making this a required argument
         help="Directory to save the output"
     )
     
@@ -90,12 +95,12 @@ def main():
     args = parse_args()
 
     # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_path, exist_ok=True)
 
     # Get prompts based on dataset type
     logger.info(f"Setting up experiment: {args.experiment}")
     if args.experiment == "kk":
-        experiment = KKProbe(output_path=args.output_dir)
+        experiment = KKProbe(input_path=args.input_path, output_path=args.output_path)
     elif args.experiment == "chess":
         # You can implement this function similarly to get_k_and_k_prompts
         logger.warning("Chess dataset not implemented, using test prompts")
@@ -122,7 +127,7 @@ def main():
 
     experiment.run_experiment()
     
-    logger.info(f"Experiment complete. Results saved to {args.output_dir}")
+    logger.info(f"Experiment complete. Results saved to {args.output_path}")
     
     return
 

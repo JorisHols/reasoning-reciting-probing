@@ -1,4 +1,5 @@
 ignored/
+outputs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -182,4 +183,7 @@ notebooks/
 # Large data files
 *.arrow
 *.zip
+
+# Snellius SLURM logs
+snellius_logs/
 

@@ -37,7 +37,7 @@ class ProbeLlamaModel:
         
         self.logger.info(f"Initializing ProbeLlamaModel with {self.model_name}")
         self.model, self.tokenizer = self._load_model_and_tokenizer()
-        self._set_device()
+        #self._set_device()
 
     def _load_model_and_tokenizer(
         self
@@ -55,7 +55,7 @@ class ProbeLlamaModel:
             
         self.logger.info(f"Loading model: {self.model_name}")
         model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            self.model_name, token=token
+            self.model_name, token=token, device_map="auto"
         )
 
         tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
@@ -66,18 +66,18 @@ class ProbeLlamaModel:
 
         return model, tokenizer
     
-    def _set_device(self, device: torch.device = None):
-        """
-        Set the device to use for the model.
-        """
-        self.device = device or torch.device(
-            "cuda" if torch.cuda.is_available() 
-            else "mps" if torch.backends.mps.is_available() 
-            else "cpu"
-        )
-        self.model.to(self.device)
-        self.logger.info(f"Model set to device: {self.device}")
-        return self.device
+    # def _set_device(self, device: torch.device = None):
+    #     """
+    #     Set the device to use for the model.
+    #     """
+    #     self.device = device or torch.device(
+    #         "cuda" if torch.cuda.is_available() 
+    #         else "mps" if torch.backends.mps.is_available() 
+    #         else "cpu"
+    #     )
+    #     self.model.to(self.device)
+    #     self.logger.info(f"Model set to device: {self.device}")
+    #     return self.device
     
     def _run_batch_with_hooks(self, batch_prompts, reset_hooks=True):
         """
@@ -97,11 +97,12 @@ class ProbeLlamaModel:
         
         try:
             # Tokenize input
+            emb_dev = self.model.get_input_embeddings().weight.device
             batch_inputs = self.tokenizer(
                 batch_prompts,
                 padding=True,
                 return_tensors="pt",
-            ).to(self.device)
+            ).to(emb_dev)
             
             # Reset activation storage if needed
             if reset_hooks:
@@ -138,7 +139,8 @@ class ProbeLlamaModel:
         with torch.no_grad():
             generation_output = self.model.generate(
                 **batch_inputs,
-                max_new_tokens=max_new_tokens
+                max_new_tokens=max_new_tokens,
+                use_cache=True
             )
 
         # Decode outputs
@@ -176,7 +178,7 @@ class ProbeLlamaModel:
         checkpoint_count = 0
         checkpoint_paths = []
         
-        for batch_start in tqdm(range(0, len(prompts), self.batch_size)):
+        for batch_start in tqdm(range(0, len(prompts), self.batch_size), position=0, leave=False):
             batch_prompts = prompts[batch_start:batch_start + self.batch_size]
             
             # Initialize output structure for this batch

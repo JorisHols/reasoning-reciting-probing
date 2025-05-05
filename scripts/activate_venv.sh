@@ -2,9 +2,14 @@
 
 # Script to activate the Poetry virtual environment for the reasoning-reciting-probing project
 
+
 # Change to the project directory
-PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd "$PROJECT_DIR/reasoning-reciting-probing"
+cd "${SLURM_SUBMIT_DIR}"
+PROJECT_DIR=$(pwd)
+cd "$PROJECT_DIR"
+
+# Install the poetry dependencies
+poetry install
 
 # Get the path to the virtual environment
 VENV_PATH=$(poetry env info --path)

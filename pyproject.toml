@@ -1,23 +1,24 @@
-[project]
+[tool.poetry]
 name = "reasoning-reciting-probing"
 version = "0.1.0"
 description = ""
-authors = [
-    {name = "j.e.holshuijsen@student.vu.nl"}
-]
+authors = ["j.e.holshuijsen@student.vu.nl"]
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = [
-    "transformers (>=4.50.2,<5.0.0)",
-    "torch (>=2.6.0,<3.0.0)",
-    "scikit-learn (>=1.6.1,<2.0.0)",
-    "matplotlib (>=3.10.1,<4.0.0)",
-    "dotenv (>=0.9.9,<0.10.0)",
-    "datasets (>=3.5.1,<4.0.0)"
-]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+transformers = ">=4.50.2,<5.0.0"
+torch = ">=2.6.0,<3.0.0"
+scikit-learn = ">=1.6.1,<2.0.0"
+matplotlib = ">=3.10.1,<4.0.0"
+python-dotenv = ">=0.9.9"
+datasets = ">=3.5.1,<4.0.0"
+pyyaml = ">=6.0"
+rich = "^14.0.0"
+accelerate = "^1.6.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-package-mode = false
 

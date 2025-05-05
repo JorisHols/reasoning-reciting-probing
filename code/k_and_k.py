@@ -10,8 +10,9 @@ class KKProbe:
     A class to collect the activations and responses for the K and K experiment.
     '''
 
-    def __init__(self, load_path: str = "datasets/k_and_k/3ppl,", output_path: str = "outputs/k_and_k/3ppl"):
-        self.load_path = load_path
+    def __init__(self, input_path: str = "inputs/k_and_k/3ppl,", output_path: str = "outputs/k_and_k/3ppl"):
+        self.input_path = input_path
+        self.output_path = output_path
         self.logger = logging.getLogger("k_and_k")
 
         # The perturbed versions of the problems to use for the experiment (must match the folder names)
@@ -26,9 +27,6 @@ class KKProbe:
 
         # MODEL AND PROBING SETTINGS
 
-
-        # OUTPUT SETTINGS
-        self.output_path = output_path
 
         # PROMPT SETTINGS
         self.TEMPLATE = (
@@ -70,8 +68,8 @@ class KKProbe:
     def run_experiment(self):
         """Run the K&K experiment."""
         # Load the data
-        self.logger.info(f"Loading data from {self.load_path}")
-        data = self.load_data(self.load_path)
+        self.logger.info(f"Loading data from {self.input_path}")
+        data = self.load_data()
 
         # Format the prompts for clean problems
         prompts = self.format_prompts(data['clean'])
@@ -82,9 +80,10 @@ class KKProbe:
             self.logger.warning("Probe model not initialized. Using default settings.")
             self.prober = self.setup_probe()
 
-        # Run the probe on all the problem sets
+        # Run the probe on the clean problems only
         for problem_set in data.keys():
-            if problem_set == "clean" or problem_set in self.perturbed_versions:
+            #if problem_set == "clean" or problem_set in self.perturbed_versions:
+            if problem_set == "clean":
                 self.logger.info(f"Processing {problem_set} problems")
                 prompts = self.format_prompts(data[problem_set])
                 results = self.prober.process_statements(
@@ -95,54 +94,80 @@ class KKProbe:
             
 
 
-    def load_data(self, load_path: str):
+    def _load_jsonl_file(self, file_path, dataset_name):
+        """
+        Helper function to load a JSONL file.
+        
+        Args:
+            file_path (str): Path to the JSONL file
+            dataset_name (str): Name of the dataset for logging purposes
+            
+        Returns:
+            list: List of JSON objects from the file
+        """
+        items = []
+        
+        if not os.path.exists(file_path):
+            self.logger.warning(f"{dataset_name} data file not found: {file_path}")
+            return items
+        
+        try:
+            with open(file_path, "r") as f:
+                # Parse JSONL format - each line is a separate JSON object
+                for line_num, line in enumerate(f, 1):
+                    if line.strip():  # Skip empty lines
+                        try:
+                            item = json.loads(line)  # Use json.loads for individual lines
+                            items.append(item)
+                        except json.JSONDecodeError as e:
+                            self.logger.warning(f"Error parsing line {line_num} in {file_path}: {e}")
+        
+            self.logger.info(f"Loaded {len(items)} {dataset_name} problems")
+        except Exception as e:
+            self.logger.error(f"Error loading {dataset_name} data: {str(e)}")
+        
+        return items
+
+    def load_data(self):
         '''
         Load the clean and perturbed problems from the given root path.
         Folder should be structured as follows: (depends on the perturbed versions you're using)
-            - k_and_k/
+            - k_and_k/3ppl/
                 - clean/
-                    - data.json
-                - flip_role/
-                    - data.json
+                    - clean_people3_num5000.jsonl
                 - perturbed_leaf/
-                    - data.json
-                - perturbed_role/
-                    - data.json
-                - reorder_statement/
-                    - data.json
-                - uncommon_name/
-                    - data.json
+                    - perturbed_leaf_people3_num5000.jsonl
+                - perturbed_statement/
+                    - perturbed_statement_people3_num5000.jsonl
+                - etc.
         
-        The root path should contain multiple folders: clean and flip_role, perturbed_leaf, perturbed_role, etc.
-        Each of these folders contains a json file with the problems.
+        Each folder contains JSONL files (JSON Lines) where each line is a valid JSON object.
         '''
-
-        if not os.path.exists(load_path):
-            self.logger.error(f"Path not found: {load_path}")
-            raise FileNotFoundError(f"File {load_path} not found")
+        if not os.path.exists(self.input_path):
+            self.logger.error(f"Path not found: {self.input_path}")
+            raise FileNotFoundError(f"File {self.input_path} not found")
         
         data = {}
         
-        # Get the clean problems
-        clean_path = os.path.join(load_path, "clean.json")
-        if os.path.exists(clean_path):
-            with open(clean_path, "r") as f:
-                data["clean"] = json.load(f)
-                self.logger.info(f"Loaded {len(data['clean'])} clean problems")
-        else:
-            self.logger.warning(f"Clean data file not found: {clean_path}")
-            data["clean"] = []
-
-        # Get the perturbed problems
+        # Load clean problems
+        clean_path = os.path.join(self.input_path, "clean/clean_people3_num5000.jsonl")
+        data["clean"] = self._load_jsonl_file(clean_path, "clean")
+        
+        # Load perturbed problems
         for perturbed_version in self.perturbed_versions:
-            perturbed_path = os.path.join(load_path, f"{perturbed_version}.json")
-            if os.path.exists(perturbed_path):
-                with open(perturbed_path, "r") as f:
-                    data[perturbed_version] = json.load(f)
-                    self.logger.info(f"Loaded {len(data[perturbed_version])} {perturbed_version} problems")
-            else:
-                self.logger.warning(f"Perturbed data file not found: {perturbed_path}")
-                
+            perturbed_path = os.path.join(
+                self.input_path, 
+                f"{perturbed_version}/{perturbed_version}_people3_num5000.jsonl"
+            )
+            data[perturbed_version] = self._load_jsonl_file(perturbed_path, perturbed_version)
+        
+        # Check if any data was loaded
+        total_items = sum(len(items) for items in data.values())
+        if total_items == 0:
+            self.logger.warning("No data items were loaded. Check your input files.")
+        else:
+            self.logger.info(f"Loaded a total of {total_items} items across all datasets")
+            
         return data
 
     def format_prompts(self, data: dict):
