@@ -4,7 +4,8 @@ import argparse
 import logging
 import os
 
-from k_and_k import KKProbe
+from kk import KKExperiment
+from chess import ChessExperiment
 
 
 def setup_basic_logging():
@@ -57,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=2,
+        default=8,
         help="Batch size for processing"
     )
     
@@ -68,18 +69,33 @@ def parse_args():
         help="Maximum number of new tokens to generate"
     )
     
-    parser.add_argument(
-        "--checkpoint_every",
-        type=int,
-        default=25,
-        help="Save checkpoint after this many batches"
-    )
+    # parser.add_argument(
+    #     "--checkpoint_every",
+    #     type=int,
+    #     default=25,
+    #     help="Save checkpoint after this many batches"
+    # )
 
     # Whether to generate response text or just capture activations
+    # parser.add_argument(
+    #     "--no_generate",
+    #     action="store_true",
+    #     help="Don't generate responses, only capture activations"
+    # )
+    
+    # Chunking parameters
     parser.add_argument(
-        "--no_generate",
-        action="store_true",
-        help="Don't generate responses, only capture activations"
+        "--chunk_id",
+        type=int,
+        default=None,
+        help="ID of the chunk to process (0-indexed)"
+    )
+    
+    parser.add_argument(
+        "--chunk_size",
+        type=int,
+        default=500,
+        help="Number of examples per chunk"
     )
     
     return parser.parse_args()
@@ -94,17 +110,37 @@ def main():
     # Parse arguments
     args = parse_args()
 
+    # Check if the output path exists
+    if not os.path.exists(args.output_path):
+        logger.error(f"Output path does not exist: {args.output_path}")
+        raise FileNotFoundError(f"Output path does not exist: {args.output_path}")
+    
+    # Check if the input path exists
+    if not os.path.exists(args.input_path):
+        logger.error(f"Input path does not exist: {args.input_path}")
+        raise FileNotFoundError(f"Input path does not exist: {args.input_path}")
+
+
     # Create output directory if it doesn't exist
     os.makedirs(args.output_path, exist_ok=True)
 
     # Get prompts based on dataset type
     logger.info(f"Setting up experiment: {args.experiment}")
     if args.experiment == "kk":
-        experiment = KKProbe(input_path=args.input_path, output_path=args.output_path)
+        experiment = KKExperiment(
+            input_path=args.input_path, 
+            output_path=args.output_path,
+            chunk_id=args.chunk_id,
+            chunk_size=args.chunk_size,
+        )
     elif args.experiment == "chess":
         # You can implement this function similarly to get_k_and_k_prompts
-        logger.warning("Chess dataset not implemented, using test prompts")
-        return
+        experiment = ChessExperiment(
+            input_path=args.input_path,
+            output_path=args.output_path,
+            chunk_id=args.chunk_id,
+            chunk_size=args.chunk_size,
+        )
     else:  # Default to test prompts
         raise ValueError(f"Dataset {args.experiment} not implemented")
 
@@ -112,23 +148,13 @@ def main():
     logger.info(
         f"Setting up probe with batch size {args.batch_size}, "
         f"max new tokens {args.max_new_tokens}, "
-        f"generate response {not args.no_generate}, "
-        f"checkpoint every {args.checkpoint_every} batches"
     )
-    
-    experiment.setup_probe(
-        batch_size=args.batch_size,
-        max_new_tokens=args.max_new_tokens,
-        generate_response=not args.no_generate,
-        checkpoint_every=args.checkpoint_every
-    )
-
+     
     logger.info("Starting experiment")
 
     experiment.run_experiment()
-    
-    logger.info(f"Experiment complete. Results saved to {args.output_path}")
-    
+
+    logger.info(f"Experiment complete.")
     return
 
 

@@ -1,0 +1,62 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "prompt": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "llm_response": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "mlp_activations": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "Sequence"
+      },
+      "_type": "Sequence"
+    },
+    "attention_activations": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "Sequence"
+      },
+      "_type": "Sequence"
+    },
+    "residual_activations": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "Sequence"
+      },
+      "_type": "Sequence"
+    },
+    "mode": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "real_world_answer": {
+      "dtype": "bool",
+      "_type": "Value"
+    },
+    "counter_factual_answer": {
+      "dtype": "bool",
+      "_type": "Value"
+    },
+    "opening": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

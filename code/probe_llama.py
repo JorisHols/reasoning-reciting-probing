@@ -26,7 +26,7 @@ class ProbeLlamaModel:
         batch_size=2, 
         max_new_tokens=2048, 
         generate_response=True, 
-        checkpoint_every=25
+        checkpoint_every=0
     ):
         self.model_name = model_name or 'meta-llama/Llama-3.1-8B-Instruct'
         self.batch_size = batch_size
@@ -213,43 +213,68 @@ class ProbeLlamaModel:
                     # Add empty placeholders if not generating responses
                     accumulated_data[key].extend([""] * len(batch_prompts))
             
-            # Save checkpoint periodically or at the end
-            checkpoint_count += 1
-            is_last_batch = (batch_start + self.batch_size >= len(prompts))
-            
-            if checkpoint_count >= self.checkpoint_every or is_last_batch:
-                checkpoint_id = batch_start // self.batch_size // self.checkpoint_every
-                dataset = Dataset.from_dict(accumulated_data)
-                # Create checkpoint path
-                checkpoint_path = (
-                    f"{output_file_path}_checkpoint_{checkpoint_id}"
-                )
-                dataset.save_to_disk(checkpoint_path)
-                checkpoint_paths.append(checkpoint_path)
+            # Handle checkpointing if enabled
+            if self.checkpoint_every > 0 and output_file_path:
+                checkpoint_count += 1
+                is_last_batch = (batch_start + self.batch_size >= len(prompts))
                 
-                # Log checkpoint details
-                checkpoint_size = len(accumulated_data["prompt"])
-                self.logger.info(
-                    f"Saved checkpoint {checkpoint_id} with {checkpoint_size} "
-                    f"examples"
-                )
-                
-                # Reset accumulated data after saving
-                accumulated_data = {
-                    "prompt": [],
-                    "llm_response": [],
-                    "mlp_activations": [],
-                    "attention_activations": [],
-                    "residual_activations": [],
-                }
-
-                checkpoint_count = 0
+                if checkpoint_count >= self.checkpoint_every or is_last_batch:
+                    checkpoint_path = self._save_checkpoint(
+                        accumulated_data, 
+                        output_file_path, 
+                        batch_start // self.batch_size // self.checkpoint_every
+                    )
+                    checkpoint_paths.append(checkpoint_path)
+                    
+                    # Reset accumulated data after saving
+                    accumulated_data = {
+                        "prompt": [],
+                        "llm_response": [],
+                        "mlp_activations": [],
+                        "attention_activations": [],
+                        "residual_activations": [],
+                    }
+                    checkpoint_count = 0
         
         self.logger.info("Batch processing complete")
         
-        # Combine all checkpoints into one dataset
-        final_dataset = self._combine_checkpoints(checkpoint_paths, output_file_path)
+        # Create final dataset
+        if self.checkpoint_every > 0 and output_file_path and checkpoint_paths:
+            # Combine checkpoints if checkpointing was used
+            final_dataset = self._combine_checkpoints(checkpoint_paths, output_file_path)
+        else:
+            # Create dataset directly from accumulated data
+            final_dataset = Dataset.from_dict(accumulated_data)
+            # if output_file_path:
+            #     final_dataset.save_to_disk(output_file_path)
+            #     self.logger.info(f"Saved dataset to {output_file_path}")
+        
         return final_dataset
+    
+    def _save_checkpoint(self, data, output_file_path, checkpoint_id):
+        """
+        Save a checkpoint of the current accumulated data.
+        
+        Args:
+            data: Dictionary of accumulated data
+            output_file_path: Base path for saving checkpoints
+            checkpoint_id: Identifier for this checkpoint
+            
+        Returns:
+            str: Path where checkpoint was saved
+        """
+        dataset = Dataset.from_dict(data)
+        checkpoint_path = f"{output_file_path}/checkpoint_{checkpoint_id}"
+        dataset.save_to_disk(checkpoint_path)
+        
+        # Log checkpoint details
+        checkpoint_size = len(data["prompt"])
+        self.logger.info(
+            f"Saved checkpoint {checkpoint_id} with {checkpoint_size} "
+            f"examples at {checkpoint_path}"
+        )
+        
+        return checkpoint_path
     
     def _combine_checkpoints(
         self, checkpoint_paths: list[str], output_file_path: str
