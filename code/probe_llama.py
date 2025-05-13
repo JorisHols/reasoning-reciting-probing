@@ -13,6 +13,7 @@ import os
 import logging
 
 import probe_utils
+from probe_utils import ModelInterventionManager
 
 
 class ProbeLlamaModel:
@@ -26,18 +27,31 @@ class ProbeLlamaModel:
         batch_size=2, 
         max_new_tokens=2048, 
         generate_response=True, 
-        checkpoint_every=0
+        checkpoint_every=0,
+        ablation_layer=None,  # Layer to ablate (0-indexed)
+        ablation_type=None,   # Type of activation to ablate 
+                              # ('mlp', 'attention', 'residual')
     ):
         self.model_name = model_name or 'meta-llama/Llama-3.1-8B-Instruct'
         self.batch_size = batch_size
         self.max_new_tokens = max_new_tokens
         self.generate_response = generate_response
         self.checkpoint_every = checkpoint_every
+        self.ablation_layer = ablation_layer
+        self.ablation_type = ablation_type
         self.logger = logging.getLogger("probe_llama")
         
-        self.logger.info(f"Initializing ProbeLlamaModel with {self.model_name}")
+        self.logger.info(
+            f"Initializing ProbeLlamaModel with {self.model_name}"
+        )
+        if ablation_layer is not None and ablation_type is not None:
+            self.logger.info(
+                f"Will ablate {ablation_type} activations at "
+                f"layer {ablation_layer}"
+            )
         self.model, self.tokenizer = self._load_model_and_tokenizer()
-        #self._set_device()
+        # self._set_device()  # Commented out as device is handled by 
+        # device_map="auto" in model loading
 
     def _load_model_and_tokenizer(
         self
@@ -79,6 +93,18 @@ class ProbeLlamaModel:
     #     self.logger.info(f"Model set to device: {self.device}")
     #     return self.device
     
+    def _tokenize_batch(self, batch_prompts):
+        """
+        Tokenize a batch of prompts.
+        """
+        # Get the correct device
+        device = self.model.get_input_embeddings().weight.device
+        return self.tokenizer(
+            batch_prompts, 
+            padding=True, 
+            return_tensors="pt"
+        ).to(device)
+    
     def _run_batch_with_hooks(self, batch_prompts, reset_hooks=True):
         """
         Process a batch with hooks, capturing activations.
@@ -92,17 +118,12 @@ class ProbeLlamaModel:
         """
         # Initialize hook environment
         hooks, activation_dicts, num_layers = (
-            probe_utils.setup_hook_environment(self.model)
+            probe_utils.setup_hooks_for_probing(self.model)
         )
         
         try:
             # Tokenize input
-            emb_dev = self.model.get_input_embeddings().weight.device
-            batch_inputs = self.tokenizer(
-                batch_prompts,
-                padding=True,
-                return_tensors="pt",
-            ).to(emb_dev)
+            batch_inputs = self._tokenize_batch(batch_prompts)
             
             # Reset activation storage if needed
             if reset_hooks:
@@ -165,7 +186,7 @@ class ProbeLlamaModel:
             f"Starting batch processing of {len(prompts)} prompts "
             f"with batch size {self.batch_size}"
         )
-
+        
         # Initialize accumulated data
         accumulated_data = {
             "prompt": [],
@@ -178,7 +199,11 @@ class ProbeLlamaModel:
         checkpoint_count = 0
         checkpoint_paths = []
         
-        for batch_start in tqdm(range(0, len(prompts), self.batch_size), position=0, leave=False):
+        for batch_start in tqdm(
+            range(0, len(prompts), self.batch_size),
+            position=0,
+            leave=False
+        ):
             batch_prompts = prompts[batch_start:batch_start + self.batch_size]
             
             # Initialize output structure for this batch
@@ -188,7 +213,6 @@ class ProbeLlamaModel:
             }
 
             # PHASE 1: Capture activations using hooks
-            # The class method handles hook setup, capture and cleanup
             processed_activations, batch_inputs = self._run_batch_with_hooks(
                 batch_prompts=batch_prompts
             )
@@ -198,7 +222,7 @@ class ProbeLlamaModel:
 
             # PHASE 2: Generate responses if requested
             if self.generate_response:
-                # Class method for generation (no hooks involved)
+                # Generate responses without any ablation
                 batch_responses = self._run_generation_without_hooks(
                     batch_inputs=batch_inputs,
                     max_new_tokens=self.max_new_tokens
@@ -216,7 +240,9 @@ class ProbeLlamaModel:
             # Handle checkpointing if enabled
             if self.checkpoint_every > 0 and output_file_path:
                 checkpoint_count += 1
-                is_last_batch = (batch_start + self.batch_size >= len(prompts))
+                is_last_batch = (
+                    batch_start + self.batch_size >= len(prompts)
+                )
                 
                 if checkpoint_count >= self.checkpoint_every or is_last_batch:
                     checkpoint_path = self._save_checkpoint(
@@ -241,13 +267,13 @@ class ProbeLlamaModel:
         # Create final dataset
         if self.checkpoint_every > 0 and output_file_path and checkpoint_paths:
             # Combine checkpoints if checkpointing was used
-            final_dataset = self._combine_checkpoints(checkpoint_paths, output_file_path)
+            final_dataset = self._combine_checkpoints(
+                checkpoint_paths, 
+                output_file_path
+            )
         else:
             # Create dataset directly from accumulated data
             final_dataset = Dataset.from_dict(accumulated_data)
-            # if output_file_path:
-            #     final_dataset.save_to_disk(output_file_path)
-            #     self.logger.info(f"Saved dataset to {output_file_path}")
         
         return final_dataset
     
@@ -324,5 +350,91 @@ class ProbeLlamaModel:
             if os.path.exists(path):
                 shutil.rmtree(path)
                 self.logger.info(f"Removed checkpoint: {path}")
+        
+        return final_dataset
+
+    def intervention_study(
+        self,
+        prompts: list[str],
+        intervention_vectors: list[torch.Tensor],
+        intervention_type: Literal["ablation", "addition"] = "addition",
+        output_file_path: str = None
+    ) -> Dataset:
+        """
+        Run an ablation study by applying custom vectors to each layer's 
+        residual stream.
+        
+        Args:
+            prompts: List of text prompts to process
+            ablation_vectors: List of tensors to apply to each layer's 
+                            residual stream. Length must match number of 
+                            layers.
+            output_file_path: Optional path to save results
+            
+        Returns:
+            Dataset: Results containing original and ablated responses
+        """
+            
+
+        # Initialize accumulated data
+        accumulated_data = {
+            "prompt": [],
+            "original_response": [],
+            "ablated_response": [],
+            "mlp_activations": [],
+            "attention_activations": [],
+            "residual_activations": [],
+        }
+
+        # Perform addition intervention to increase reasoning ability
+        hook_manager = ModelInterventionManager(
+            self.model,
+            intervention_vectors=intervention_vectors,
+            intervention_type=intervention_type,
+            alpha=0.1
+        )
+        hook_manager.setup_hooks()
+
+        # Process each batch
+        for batch_start in tqdm(
+            range(0, len(prompts), self.batch_size),
+            position=0,
+            leave=False
+        ):
+            batch_prompts = prompts[batch_start:batch_start + self.batch_size]
+            
+            # Initialize output structure for this batch
+            batch_output_data = {
+                "prompt": batch_prompts,
+                "original_response": [],
+                "ablated_response": [],
+            }
+            
+            batch_inputs = self._tokenize_batch(batch_prompts=batch_prompts)
+            
+
+            # Run generation with ablation
+            with torch.no_grad():
+                generation_output = self.model.generate(
+                    **batch_inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    use_cache=True
+                )
+                
+            # Decode outputs
+            ablated_responses = self.tokenizer.batch_decode(
+                generation_output,
+                skip_special_tokens=True
+            )
+            batch_output_data["ablated_response"] = ablated_responses
+                        
+            # Accumulate batch data
+            for key in accumulated_data:
+                if key in batch_output_data:
+                    accumulated_data[key].extend(batch_output_data[key])
+        
+        # Create final dataset
+        final_dataset = Dataset.from_dict(accumulated_data)
+        hook_manager.remove_hooks()
         
         return final_dataset

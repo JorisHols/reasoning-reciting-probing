@@ -97,6 +97,14 @@ def parse_args():
         default=500,
         help="Number of examples per chunk"
     )
+
+    parser.add_argument(
+        "--experiment_type",
+        type=str,
+        default="probe",
+        choices=["probe", "intervention"],
+        help="Type of experiment to run"
+    )
     
     return parser.parse_args()
 
@@ -152,7 +160,12 @@ def main():
      
     logger.info("Starting experiment")
 
-    experiment.run_experiment()
+    if args.experiment_type == "probe":
+        experiment.run_experiment()
+    elif args.experiment_type == "intervention":
+        experiment.run_intervention_study(
+            intervention_type="addition"
+        )
 
     logger.info(f"Experiment complete.")
     return

@@ -1,6 +1,8 @@
 import json
 import os
 import logging
+import torch
+from typing import Literal
 
 from datasets import Dataset
 from probe_llama import ProbeLlamaModel
@@ -121,7 +123,6 @@ class ChessExperiment:
         return dataset
 
 
-
     def format_prompts(self, data: list):
         """Format the prompts for the probe model."""
         def format_prompt(opening: str, mode: str):
@@ -167,4 +168,43 @@ class ChessExperiment:
                 control_prompt += f"he two {opening}s on the board should be initially at which squares?"
                 control_prompts.append(self.TEMPLATE.format(system_prompt=self._create_system_prompt(mode, is_control=True), prompt=control_prompt))
         return control_prompts
-       
+    
+
+    def run_intervention_study(
+        self,
+        input_path: str = None,
+        intervention_type: Literal["ablation", "addition"] = "addition"
+    ):
+        """Run the intervention study."""
+        # If input path is not provided, use the input path of the experiment
+        if input_path is None:
+            input_path = self.input_path
+        
+        intervention_vectors = self._load_intervention_vectors(input_path)
+        data = self.load_data()
+        prompts = self.format_prompts(data)
+        dataset = self.prober.intervention_study(
+            prompts,
+            self.output_path,
+            intervention_vectors,
+            intervention_type
+        )
+        dataset.save_to_disk(self.output_path)
+        self.logger.info(f"Intervention study results saved to {self.output_path}")
+
+    def _load_intervention_vectors(self, input_path):
+        # Check if the intervention vector path exists
+        if not os.path.exists(input_path):
+            raise ValueError(
+                f"Intervention vector path does not exist: {input_path}"
+            )
+        
+        # Load the intervention vectors
+        with open(input_path, "r") as f:
+            intervention_vectors = json.load(f)
+
+        # Convert the intervention vectors to list of tensors
+        intervention_vectors = [
+            torch.tensor(v) for k, v in intervention_vectors.items()
+        ]
+        return intervention_vectors

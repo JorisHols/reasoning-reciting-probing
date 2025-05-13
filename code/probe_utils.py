@@ -1,5 +1,6 @@
 """Utilities for setting up hooks to capture activations from the model."""
 import logging
+from typing import Literal
 from transformers import PreTrainedModel
 import numpy as np
 
@@ -25,7 +26,7 @@ def get_activation_hook(layer_idx, activation_dict):
     return hook
 
 
-def register_hooks(
+def register_probing_hooks(
     model: PreTrainedModel, 
     mlp_activations={}, 
     attention_activations={}, 
@@ -138,16 +139,109 @@ def process_activations(activation_dicts, num_layers, batch_prompts):
     return processed_data
 
 
-def setup_hook_environment(model):
+def setup_hooks_for_probing(model):
     """Set up the complete hook environment in a single function call."""
     num_layers = len(model.model.layers)
     activation_dicts = initialize_activation_dicts(num_layers)
-    hooks = register_hooks(
+    hooks = register_probing_hooks(
         model=model,
         mlp_activations=activation_dicts['mlp'],
         attention_activations=activation_dicts['attention'],
         residual_activations=activation_dicts['residual']
     )
-    logger.debug(f"Registered {len(hooks)} hooks")
+    logger.debug(f"Registered {len(hooks)} probing hooks")
     
     return hooks, activation_dicts, num_layers
+
+
+class ModelInterventionManager:
+    """Class to manage model interventions through hooks."""
+    
+    def __init__(self, model, intervention_vectors=None, 
+                 intervention_type: Literal["ablation", "addition"] = "addition",
+                 alpha=0.1):
+        """
+        Initialize the intervention manager.
+        
+        Args:
+            model: The model to apply interventions to
+            intervention_vectors: Optional vectors to apply to each layer
+            intervention_type: Type of intervention ("addition" or "ablation")
+            alpha: Scaling factor for the intervention vector
+        """
+        self.model = model
+        self.intervention_vectors = intervention_vectors
+        self.intervention_type = intervention_type
+        self.alpha = alpha
+        self.hooks = []
+        
+    def setup_hooks(self, intervention_vectors=None):
+        """
+        Set up intervention hooks on the model.
+        
+        Args:
+            intervention_vectors: Optional vectors to override the ones set at init
+            
+        Returns:
+            List of registered hooks
+        """
+        vectors = intervention_vectors or self.intervention_vectors
+        if vectors is None:
+            raise ValueError("No intervention vectors provided")
+            
+        if len(vectors) != len(self.model.model.layers):
+            raise ValueError(
+                f"Number of intervention vectors ({len(vectors)}) "
+                f"must match number of layers ({len(self.model.model.layers)})"
+            )
+            
+        self.hooks = self._register_hooks(vectors)
+        logger.debug(f"Registered {len(self.hooks)} intervention hooks")
+        return self.hooks
+    
+    def _register_hooks(self, intervention_vectors):
+        """Register intervention hooks on each layer."""
+        hooks = []
+        for layer_idx, intervention_vec in enumerate(intervention_vectors):
+            layer = self.model.model.layers[layer_idx]
+            hook_handle = layer.register_forward_hook(
+                self._create_hook(intervention_vec)
+            )
+            hooks.append(hook_handle)
+        return hooks
+    
+    def _create_hook(self, intervention_vec):
+        """Create a hook function that applies the intervention vector."""
+        def hook(module, input, output):
+            # Apply intervention vector to the residual stream
+            # output shape: [batch_size, seq_len, hidden_size]
+            batch_size = output.shape[0]
+            intervention_vec_batch = intervention_vec.expand(
+                batch_size, -1, -1
+            )
+            
+            if self.intervention_type == "ablation":
+                # Normalize the intervention vector to get a unit vector
+                unit_vec = intervention_vec_batch / intervention_vec_batch.norm(dim=-1, keepdim=True)
+                
+                # Calculate the projection of output onto the unit vector
+                # This is the component we want to remove
+                projection = (output * unit_vec).sum(dim=-1, keepdim=True) * unit_vec
+                
+                # Subtract the projection (scaled by alpha) from the output
+                return output - self.alpha * projection
+            elif self.intervention_type == "addition":
+                return output + self.alpha * intervention_vec_batch
+            else:
+                raise ValueError(
+                    f"Invalid intervention type: {self.intervention_type}"
+                )
+        
+        return hook
+    
+    def remove_hooks(self):
+        """Remove all registered hooks."""
+        for hook in self.hooks:
+            hook.remove()
+        logger.debug(f"Removed {len(self.hooks)} intervention hooks")
+        self.hooks = []
