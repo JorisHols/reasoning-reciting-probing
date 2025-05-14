@@ -54,7 +54,7 @@ setup_and_submit() {
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     local temp_dir="${output_base}/temp_${timestamp}"
     echo "Creating temporary directory: $temp_dir"
-    mkdir -p "$temp_dir"
+    mkdir -p "$temp_dir/logs"  # Create the main logs directory
 
     # Create all chunk directories in the temporary directory
     for chunk_id in $(seq 0 $((num_chunks-1))); do

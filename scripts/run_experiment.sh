@@ -126,7 +126,9 @@ CMD="python code/main.py \
     --batch_size 8 \
     --max_new_tokens 2048 \
     --chunk_size $CHUNK_SIZE \
-    --chunk_id $CHUNK_ID"
+    --chunk_id $CHUNK_ID \
+    --invervention_vector_path ./inputs/chess/interventions/world_detection_coefficients.json \
+    --experiment_type intervention"
 
 # Add chunk_id only if it's provided
 if [ ! -z "$CHUNK_ID" ]; then

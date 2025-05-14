@@ -1,4 +1,5 @@
 import shutil
+from typing import Literal
 from transformers import (
     PreTrainedModel, 
     PreTrainedTokenizer, 
@@ -98,12 +99,12 @@ class ProbeLlamaModel:
         Tokenize a batch of prompts.
         """
         # Get the correct device
-        device = self.model.get_input_embeddings().weight.device
+        self.device = self.model.get_input_embeddings().weight.device
         return self.tokenizer(
             batch_prompts, 
             padding=True, 
             return_tensors="pt"
-        ).to(device)
+        ).to(self.device)
     
     def _run_batch_with_hooks(self, batch_prompts, reset_hooks=True):
         """
@@ -353,12 +354,11 @@ class ProbeLlamaModel:
         
         return final_dataset
 
-    def intervention_study(
+    def process_intervention(
         self,
         prompts: list[str],
         intervention_vectors: list[torch.Tensor],
-        intervention_type: Literal["ablation", "addition"] = "addition",
-        output_file_path: str = None
+        intervention_type: Literal["ablation", "addition"] = "addition"
     ) -> Dataset:
         """
         Run an ablation study by applying custom vectors to each layer's 
@@ -379,21 +379,16 @@ class ProbeLlamaModel:
         # Initialize accumulated data
         accumulated_data = {
             "prompt": [],
-            "original_response": [],
-            "ablated_response": [],
-            "mlp_activations": [],
-            "attention_activations": [],
-            "residual_activations": [],
+            "intervention_response": [],
         }
 
         # Perform addition intervention to increase reasoning ability
         hook_manager = ModelInterventionManager(
             self.model,
-            intervention_vectors=intervention_vectors,
             intervention_type=intervention_type,
             alpha=0.1
         )
-        hook_manager.setup_hooks()
+        hook_manager.setup_hooks(intervention_vectors)
 
         # Process each batch
         for batch_start in tqdm(
@@ -406,8 +401,7 @@ class ProbeLlamaModel:
             # Initialize output structure for this batch
             batch_output_data = {
                 "prompt": batch_prompts,
-                "original_response": [],
-                "ablated_response": [],
+                "intervention_response": [],
             }
             
             batch_inputs = self._tokenize_batch(batch_prompts=batch_prompts)
@@ -422,11 +416,11 @@ class ProbeLlamaModel:
                 )
                 
             # Decode outputs
-            ablated_responses = self.tokenizer.batch_decode(
+            intervention_responses = self.tokenizer.batch_decode(
                 generation_output,
                 skip_special_tokens=True
             )
-            batch_output_data["ablated_response"] = ablated_responses
+            batch_output_data["intervention_response"] = intervention_responses
                         
             # Accumulate batch data
             for key in accumulated_data:

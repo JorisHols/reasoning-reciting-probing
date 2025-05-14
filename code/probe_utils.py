@@ -157,7 +157,7 @@ def setup_hooks_for_probing(model):
 class ModelInterventionManager:
     """Class to manage model interventions through hooks."""
     
-    def __init__(self, model, intervention_vectors=None, 
+    def __init__(self, model,
                  intervention_type: Literal["ablation", "addition"] = "addition",
                  alpha=0.1):
         """
@@ -170,10 +170,10 @@ class ModelInterventionManager:
             alpha: Scaling factor for the intervention vector
         """
         self.model = model
-        self.intervention_vectors = intervention_vectors
         self.intervention_type = intervention_type
         self.alpha = alpha
         self.hooks = []
+        self.device = model.get_input_embeddings().weight.device
         
     def setup_hooks(self, intervention_vectors=None):
         """
@@ -185,7 +185,7 @@ class ModelInterventionManager:
         Returns:
             List of registered hooks
         """
-        vectors = intervention_vectors or self.intervention_vectors
+        vectors = intervention_vectors
         if vectors is None:
             raise ValueError("No intervention vectors provided")
             
@@ -202,40 +202,61 @@ class ModelInterventionManager:
     def _register_hooks(self, intervention_vectors):
         """Register intervention hooks on each layer."""
         hooks = []
-        for layer_idx, intervention_vec in enumerate(intervention_vectors):
-            layer = self.model.model.layers[layer_idx]
-            hook_handle = layer.register_forward_hook(
-                self._create_hook(intervention_vec)
+        hidden_size = self.model.config.hidden_size
+        logger.info(f"Model hidden size: {hidden_size}")
+        
+        for i, layer in enumerate(self.model.model.layers):
+            # Verify intervention vector dimension matches hidden size
+            if intervention_vectors[i].shape[0] != hidden_size:
+                raise ValueError(
+                    f"Intervention vector dimension ({intervention_vectors[i].shape[0]}) "
+                    f"does not match model hidden size ({hidden_size}) for layer {i}"
+                )
+            
+            # Register hook on the layer's input (before attention)
+            # This way we modify the residual stream before it goes through attention
+            hook_handle = layer.register_forward_pre_hook(
+                self._create_hook(intervention_vectors[i], layer_idx=i)
             )
             hooks.append(hook_handle)
         return hooks
     
-    def _create_hook(self, intervention_vec):
+    def _create_hook(self, intervention_vec, layer_idx):
         """Create a hook function that applies the intervention vector."""
-        def hook(module, input, output):
-            # Apply intervention vector to the residual stream
-            # output shape: [batch_size, seq_len, hidden_size]
-            batch_size = output.shape[0]
-            intervention_vec_batch = intervention_vec.expand(
-                batch_size, -1, -1
-            )
+        def hook(module, input):
+            # input is a tuple, we want the first element which is the hidden states
+            # input[0] shape: [batch_size, seq_len, hidden_size]
+            hidden_states = input[0]
+            
+            # Create a copy of the intervention vector and reshape it to (1, 1, hidden_size)
+            # This shape will broadcast correctly to any sequence length
+            intervention_vec_copy = intervention_vec.clone().view(1, 1, -1).to(self.device)
+            
+            # Create a modified input tensor
+            modified_hidden_states = hidden_states.clone()
             
             if self.intervention_type == "ablation":
                 # Normalize the intervention vector to get a unit vector
-                unit_vec = intervention_vec_batch / intervention_vec_batch.norm(dim=-1, keepdim=True)
+                # The normalization will broadcast correctly
+                unit_vec = intervention_vec_copy / intervention_vec_copy.norm(dim=-1, keepdim=True)
                 
-                # Calculate the projection of output onto the unit vector
-                # This is the component we want to remove
-                projection = (output * unit_vec).sum(dim=-1, keepdim=True) * unit_vec
+                # The multiplication and sum will broadcast correctly to any sequence length
+                # because intervention_vec_copy is (1, 1, hidden_size)
+                projection = (modified_hidden_states * unit_vec).sum(dim=-1, keepdim=True) * unit_vec
                 
-                # Subtract the projection (scaled by alpha) from the output
-                return output - self.alpha * projection
+                # Subtract the projection (scaled by alpha) from all tokens
+                modified_hidden_states = modified_hidden_states - self.alpha * projection
             elif self.intervention_type == "addition":
-                return output + self.alpha * intervention_vec_batch
+                # The addition will broadcast correctly to any sequence length
+                # because intervention_vec_copy is (1, 1, hidden_size)
+                modified_hidden_states = modified_hidden_states + self.alpha * intervention_vec_copy
             else:
                 raise ValueError(
                     f"Invalid intervention type: {self.intervention_type}"
                 )
+            
+            # Return the modified input tuple
+            return (modified_hidden_states,) + input[1:]
         
         return hook
     

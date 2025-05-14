@@ -5,6 +5,7 @@ from datasets import load_from_disk
 def main():
     parser = argparse.ArgumentParser(description="Inspect a Hugging Face dataset and print llm_answer for each row")
     parser.add_argument("dataset_path", type=str, help="Path to the dataset directory")
+    parser.add_argument("dataset_type", type=str, help="Type of dataset to inspect", choices=["probe", "intervention"])
     args = parser.parse_args()
     
     # Check if the path exists
@@ -18,15 +19,23 @@ def main():
         print(f"Loaded dataset with {len(dataset)} rows")
         
         # Check if llm_response exists in the dataset
-        if "llm_response" not in dataset.column_names:
+        if args.dataset_type == "probe" and "llm_response" not in dataset.column_names:
             print("Error: Dataset does not contain 'llm_response' column")
+            print(f"Available columns: {dataset.column_names}")
+            return
+        elif args.dataset_type == "intervention" and "intervention_response" not in dataset.column_names:
+            print("Error: Dataset does not contain 'intervention_response' column")
             print(f"Available columns: {dataset.column_names}")
             return
         
         # Print each llm_response on a new line
         for i, row in enumerate(dataset):
-            print(f"Row {i} llm_response:")
-            print(row["llm_response"])
+            if args.dataset_type == "probe":
+                print(f"Row {i} llm_response:")
+                print(row["llm_response"])
+            elif args.dataset_type == "intervention":
+                print(f"Row {i} intervention_response:")
+                print(row["intervention_response"])
             print("-" * 80)  # Separator between responses
             
     except Exception as e:

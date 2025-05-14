@@ -7,7 +7,8 @@ to verify that the full pipeline works and checkpointing is functional.
 import os
 import logging
 import argparse
-from k_and_k import KKProbe
+from probe_llama import ProbeLlamaModel
+from kk import KKProbe
 
 # Set up logging to match the main script
 logging.basicConfig(

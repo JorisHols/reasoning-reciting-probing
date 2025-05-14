@@ -105,6 +105,13 @@ def parse_args():
         choices=["probe", "intervention"],
         help="Type of experiment to run"
     )
+
+    parser.add_argument(
+        "--invervention_vector_path",
+        type=str,
+        default=None,
+        help="Path to the intervention vector"
+    )
     
     return parser.parse_args()
 
@@ -164,7 +171,8 @@ def main():
         experiment.run_experiment()
     elif args.experiment_type == "intervention":
         experiment.run_intervention_study(
-            intervention_type="addition"
+            intervention_type="addition",
+            invervention_vector_path=args.invervention_vector_path
         )
 
     logger.info(f"Experiment complete.")

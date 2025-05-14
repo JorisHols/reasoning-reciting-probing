@@ -172,22 +172,21 @@ class ChessExperiment:
 
     def run_intervention_study(
         self,
-        input_path: str = None,
-        intervention_type: Literal["ablation", "addition"] = "addition"
+        intervention_type: Literal["ablation", "addition"] = "addition",
+        invervention_vector_path: str = None,
     ):
         """Run the intervention study."""
         # If input path is not provided, use the input path of the experiment
-        if input_path is None:
-            input_path = self.input_path
+        if invervention_vector_path is None:
+            raise ValueError("Intervention vector path is required")
         
-        intervention_vectors = self._load_intervention_vectors(input_path)
+        intervention_vectors = self._load_intervention_vectors(invervention_vector_path)
         data = self.load_data()
         prompts = self.format_prompts(data)
-        dataset = self.prober.intervention_study(
+        dataset = self.prober.process_intervention(
             prompts,
-            self.output_path,
             intervention_vectors,
-            intervention_type
+            intervention_type,
         )
         dataset.save_to_disk(self.output_path)
         self.logger.info(f"Intervention study results saved to {self.output_path}")
@@ -205,6 +204,6 @@ class ChessExperiment:
 
         # Convert the intervention vectors to list of tensors
         intervention_vectors = [
-            torch.tensor(v) for k, v in intervention_vectors.items()
+            torch.tensor(intervention_vectors[k]['weights']) for k in intervention_vectors.keys()
         ]
         return intervention_vectors
