@@ -187,3 +187,7 @@ cython_debug/
 # Snellius SLURM logs
 snellius_logs/
 
+# Environment variables
+.env
+.env.*
+
