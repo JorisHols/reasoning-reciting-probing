@@ -1,4 +1,2 @@
 inputs/** filter=lfs diff=lfs merge=lfs -text
-results/** filter=lfs diff=lfs merge=lfs -text
-results/* filter=lfs diff=lfs merge=lfs -text
 *.arrow filter=lfs diff=lfs merge=lfs -text
