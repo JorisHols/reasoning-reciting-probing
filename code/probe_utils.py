@@ -1,9 +1,9 @@
 """Utilities for setting up hooks to capture activations from the model."""
 import logging
 from typing import Literal
-from transformers import PreTrainedModel
 import numpy as np
 
+from transformers import PreTrainedModel
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ class ModelInterventionManager:
     
     def __init__(self, model,
                  intervention_type: Literal["ablation", "addition"] = "addition",
-                 alpha=0.1):
+                 alpha: float = 0.1):
         """
         Initialize the intervention manager.
         

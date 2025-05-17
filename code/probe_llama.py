@@ -338,6 +338,7 @@ class ProbeLlamaModel:
         
         # Create the final dataset
         final_dataset = Dataset.from_dict(combined_data)
+        # Add a dummy field to _format_kwargs to fix PyArrow error
         self.logger.info(
             f"Created combined dataset with {len(final_dataset)} examples"
         )
@@ -429,6 +430,7 @@ class ProbeLlamaModel:
         
         # Create final dataset
         final_dataset = Dataset.from_dict(accumulated_data)
+
         hook_manager.remove_hooks()
         
         return final_dataset

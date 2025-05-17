@@ -154,8 +154,7 @@ def main():
             input_path=args.input_path,
             output_path=args.output_path,
             chunk_id=args.chunk_id,
-            chunk_size=args.chunk_size,
-        )
+            chunk_size=args.chunk_size,    )
     else:  # Default to test prompts
         raise ValueError(f"Dataset {args.experiment} not implemented")
 
