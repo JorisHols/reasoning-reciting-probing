@@ -29,6 +29,14 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="$2"
       shift 2
       ;;
+    --intervention_vector_filename)
+      INTERVENTION_VECTOR_FILENAME="$2"
+      shift 2
+      ;;
+    --alpha)
+      ALPHA="$2"
+      shift 2
+      ;;
     *)
       shift
       ;;
@@ -38,6 +46,16 @@ done
 # Check if required arguments are provided
 if [ -z "$INPUT_PATH" ]; then
     echo "ERROR: Input path must be specified with --input_path"
+    exit 1
+fi
+
+if [ -z "$INTERVENTION_VECTOR_FILENAME" ]; then
+    echo "ERROR: Intervention vector filename must be specified with --intervention_vector_filename"
+    exit 1
+fi
+
+if [ -z "$ALPHA" ]; then
+    echo "ERROR: Alpha must be specified with --alpha"
     exit 1
 fi
 
@@ -127,8 +145,9 @@ CMD="python code/main.py \
     --max_new_tokens 2048 \
     --chunk_size $CHUNK_SIZE \
     --chunk_id $CHUNK_ID \
-    --invervention_vector_path ./inputs/chess/interventions/liref_reasoning_directions.json \
-    --experiment_type intervention"
+    --invervention_vector_path ./inputs/chess/interventions/$INTERVENTION_VECTOR_FILENAME \
+    --experiment_type intervention \
+    --alpha $ALPHA"
 
 # Add chunk_id only if it's provided
 if [ ! -z "$CHUNK_ID" ]; then
@@ -136,7 +155,7 @@ if [ ! -z "$CHUNK_ID" ]; then
 fi
 
 # Execute the command
-$CMD 2>&1 | tee "$OUTPUT_DIR/run_log.txt"
+$CMD 2>&1 
 
 # # Copy script that was used for this run for reference
 # mkdir -p "$OUTPUT_DIR/scripts_used"

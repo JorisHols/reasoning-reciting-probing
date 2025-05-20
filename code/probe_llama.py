@@ -359,7 +359,8 @@ class ProbeLlamaModel:
         self,
         prompts: list[str],
         intervention_vectors: list[torch.Tensor],
-        intervention_type: Literal["ablation", "addition"] = "addition"
+        intervention_type: Literal["ablation", "addition"] = "addition",
+        alpha: float = 0.0,
     ) -> Dataset:
         """
         Run an ablation study by applying custom vectors to each layer's 
@@ -387,7 +388,7 @@ class ProbeLlamaModel:
         hook_manager = ModelInterventionManager(
             self.model,
             intervention_type=intervention_type,
-            alpha=0.1
+            alpha=alpha
         )
         hook_manager.setup_hooks(intervention_vectors)
 

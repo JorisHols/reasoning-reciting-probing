@@ -8,13 +8,13 @@ from datasets import Dataset
 from probe_llama import ProbeLlamaModel
 
 
-class ChessExperiment:
+class ArithmeticExperiment:
     def __init__(self, input_path: str, output_path: str, chunk_size: int, chunk_id: int):
         self.input_path = input_path
         self.output_path = output_path
         self.chunk_size = chunk_size
         self.chunk_id = chunk_id
-        self.logger = logging.getLogger("chess")
+        self.logger = logging.getLogger("arithmetic")
         self.prober = self.setup_probe()
         
         # Create the (chunk) output folder if it doesn't exist
@@ -125,12 +125,8 @@ class ChessExperiment:
 
     def format_prompts(self, data: list):
         """Format the prompts for the probe model."""
-        def format_prompt(opening: str, mode: str):
-            if mode == "real_world":
-                user_prompt = f"Is the new opening \"{opening}\" legal? "
-            elif mode == "counter_factual":
-                user_prompt = f"Under the custom variant, is the new opening \"{opening}\" legal? "
-        
+        def format_prompt(expr: str):
+            user_prompt = f"What is {expr}? Do this by counting the few preceding numbers and completing the sequence. End the response with the result in \"\\boxed{{result}}\"."
             prompt = "### Question: \n" + user_prompt + "\n"
             prompt += "### Answer: \n"
             return prompt
@@ -138,36 +134,21 @@ class ChessExperiment:
         prompts = []
 
         for line in data:
-            user_prompt = format_prompt(line["opening"], line["mode"])
-            system_prompt = self._create_system_prompt(line["mode"])
+            user_prompt = format_prompt(line["expr"])
+            system_prompt = self._create_system_prompt(line["base"])
             prompts.append(self.TEMPLATE.format(system_prompt=system_prompt, prompt=user_prompt))
 
 
         return prompts
     
-    def _create_system_prompt(self, mode, is_control: bool = False):
-            if mode not in ["counter_factual", "real_world"]:
-                raise ValueError(f"Invalid mode: {mode}")
-
-            system_prompt = "You are a chess player."
-
-            if mode == "counter_factual":
-                system_prompt += " You are playing a chess variant where the starting positions for knights and bishops are swapped. For each color, the knights are at placed that where bishops used to be and the bishops are now placed at where knights used to be."
-
-            if not is_control:
-                system_prompt += " Given an opening, determine whether the opening is legal. The opening doesn't need to be a good opening. Answer \"\\boxed{yes}\" if all moves are legal. Answer \"\\boxed{no}\" if the opening violates any rules of chess.\n"
+    def _create_system_prompt(self, base):
+            digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            system_prompt = f"You are a mathematician. Assuming that all numbers are in base-{base}, where the digits are \"{digits[:base]}\"."
 
             return system_prompt
 
-    def _create_control_prompts(self):
-        control_prompts = []
-        for mode in ["real_world", "counter_factual"]:
-            openings = ["white bishop", "black bishop", "white knight", "black knight"]
-            for opening in openings:
-                control_prompt = "In this chess variant, t" if mode == "counter_factual" else "T"
-                control_prompt += f"he two {opening}s on the board should be initially at which squares?"
-                control_prompts.append(self.TEMPLATE.format(system_prompt=self._create_system_prompt(mode, is_control=True), prompt=control_prompt))
-        return control_prompts
+    def _create_control_prompts(self, expr: str):
+        return f"What is the next number after {expr}? Do this by counting the few preceding numbers and completing the sequence. End the response with the result."
     
 
     def run_intervention_study(

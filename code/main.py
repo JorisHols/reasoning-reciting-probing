@@ -112,7 +112,13 @@ def parse_args():
         default=None,
         help="Path to the intervention vector"
     )
-    
+
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="Alpha for the intervention"
+    )
     return parser.parse_args()
 
 
@@ -171,7 +177,8 @@ def main():
     elif args.experiment_type == "intervention":
         experiment.run_intervention_study(
             intervention_type="addition",
-            invervention_vector_path=args.invervention_vector_path
+            invervention_vector_path=args.invervention_vector_path,
+            alpha=args.alpha
         )
 
     logger.info(f"Experiment complete.")
