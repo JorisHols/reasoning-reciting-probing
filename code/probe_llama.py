@@ -25,31 +25,22 @@ class ProbeLlamaModel:
     def __init__(
         self, 
         model_name=None, 
-        batch_size=2, 
-        max_new_tokens=2048, 
+        batch_size=4, 
+        max_new_tokens=10, 
         generate_response=True, 
-        checkpoint_every=0,
-        ablation_layer=None,  # Layer to ablate (0-indexed)
-        ablation_type=None,   # Type of activation to ablate 
-                              # ('mlp', 'attention', 'residual')
+        checkpoint_every=0,                              # ('mlp', 'attention', 'residual')
     ):
         self.model_name = model_name or 'meta-llama/Llama-3.1-8B-Instruct'
         self.batch_size = batch_size
         self.max_new_tokens = max_new_tokens
         self.generate_response = generate_response
         self.checkpoint_every = checkpoint_every
-        self.ablation_layer = ablation_layer
-        self.ablation_type = ablation_type
         self.logger = logging.getLogger("probe_llama")
         
         self.logger.info(
             f"Initializing ProbeLlamaModel with {self.model_name}"
         )
-        if ablation_layer is not None and ablation_type is not None:
-            self.logger.info(
-                f"Will ablate {ablation_type} activations at "
-                f"layer {ablation_layer}"
-            )
+ 
         self.model, self.tokenizer = self._load_model_and_tokenizer()
         # self._set_device()  # Commented out as device is handled by 
         # device_map="auto" in model loading
@@ -72,6 +63,8 @@ class ProbeLlamaModel:
         model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             self.model_name, token=token, device_map="auto"
         )
+
+        model.eval()
 
         tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             self.model_name, token=token, padding_side="left"
@@ -106,7 +99,7 @@ class ProbeLlamaModel:
             return_tensors="pt"
         ).to(self.device)
     
-    def _run_batch_with_hooks(self, batch_prompts, reset_hooks=True):
+    def _run_batch_with_hooks(self, batch_prompts, batch_inputs, reset_hooks=True):
         """
         Process a batch with hooks, capturing activations.
         
@@ -121,18 +114,15 @@ class ProbeLlamaModel:
         hooks, activation_dicts, num_layers = (
             probe_utils.setup_hooks_for_probing(self.model)
         )
-        
-        try:
-            # Tokenize input
-            batch_inputs = self._tokenize_batch(batch_prompts)
-            
+
+        try: 
             # Reset activation storage if needed
             if reset_hooks:
                 probe_utils.reset_activation_dicts(self.model)
                 
             # Capture activations
             with torch.no_grad():
-                _ = self.model(**batch_inputs)
+                output = self.model(**batch_inputs)
             
             # Process captured activations
             activations = probe_utils.process_activations(
@@ -141,13 +131,13 @@ class ProbeLlamaModel:
                 batch_prompts
             )
             
-            return activations, batch_inputs
+            return activations, output.logits.argmax(dim=-1)
         finally:
             # Always remove hooks
             probe_utils.remove_hooks(hooks)
             self.logger.debug("Hooks removed after batch processing")
 
-    def _run_generation_without_hooks(self, batch_inputs, max_new_tokens=250):
+    def _run_generation_without_hooks(self, batch_inputs, max_new_tokens=10):
         """
         Run generation without any hooks active.
         
@@ -162,7 +152,8 @@ class ProbeLlamaModel:
             generation_output = self.model.generate(
                 **batch_inputs,
                 max_new_tokens=max_new_tokens,
-                use_cache=True
+                use_cache=True,
+                do_sample=False
             )
 
         # Decode outputs
@@ -172,11 +163,15 @@ class ProbeLlamaModel:
         )
         
         return batch_responses
+    
 
     def process_statements(
         self, 
         prompts: list[str], 
-        output_file_path: str = None
+        output_file_path: str = None,
+        intervention_vectors: list[torch.Tensor] = None,
+        alpha: float = 0.0,
+        collect_activations: bool = True
     ) -> Dataset:
         """
         Process statements and capture activations using clean hook management.
@@ -197,8 +192,15 @@ class ProbeLlamaModel:
             "residual_activations": [],
         }
         
-        checkpoint_count = 0
-        checkpoint_paths = []
+        # IF intervention vectors are provided, all queries are run with the intervention
+        if intervention_vectors is not None:
+            self.logger.info("Running with intervention")
+            hook_manager = ModelInterventionManager(
+                self.model,
+                intervention_type="addition",
+                alpha=alpha
+            )
+            hook_manager.setup_hooks(intervention_vectors)
         
         for batch_start in tqdm(
             range(0, len(prompts), self.batch_size),
@@ -206,6 +208,8 @@ class ProbeLlamaModel:
             leave=False
         ):
             batch_prompts = prompts[batch_start:batch_start + self.batch_size]
+            # Tokenize input
+            batch_inputs = self._tokenize_batch(batch_prompts)
             
             # Initialize output structure for this batch
             batch_output_data = {
@@ -214,67 +218,48 @@ class ProbeLlamaModel:
             }
 
             # PHASE 1: Capture activations using hooks
-            processed_activations, batch_inputs = self._run_batch_with_hooks(
-                batch_prompts=batch_prompts
-            )
-            
-            # Add processed activations to batch output
-            batch_output_data.update(processed_activations)
+            if collect_activations:
+                processed_activations, token_ids = self._run_batch_with_hooks(
+                    batch_prompts=batch_prompts,
+                    batch_inputs=batch_inputs
+                )
 
-            # PHASE 2: Generate responses if requested
+                if not self.generate_response:
+                    batch_responses = self.tokenizer.batch_decode(
+                        token_ids.tolist(),
+                        skip_special_tokens=True
+                    )
+                    batch_output_data["llm_response"] = batch_responses
+
+                batch_output_data.update(processed_activations)
+
+
             if self.generate_response:
-                # Generate responses without any ablation
+                # Generate responses without capturing activations
                 batch_responses = self._run_generation_without_hooks(
                     batch_inputs=batch_inputs,
                     max_new_tokens=self.max_new_tokens
                 )
                 batch_output_data["llm_response"] = batch_responses
-
+            
+     
             # Accumulate batch data
             for key in accumulated_data:
                 if key in batch_output_data:
                     accumulated_data[key].extend(batch_output_data[key])
-                elif key == "llm_response" and not self.generate_response:
-                    # Add empty placeholders if not generating responses
-                    accumulated_data[key].extend([""] * len(batch_prompts))
-            
-            # Handle checkpointing if enabled
-            if self.checkpoint_every > 0 and output_file_path:
-                checkpoint_count += 1
-                is_last_batch = (
-                    batch_start + self.batch_size >= len(prompts)
-                )
-                
-                if checkpoint_count >= self.checkpoint_every or is_last_batch:
-                    checkpoint_path = self._save_checkpoint(
-                        accumulated_data, 
-                        output_file_path, 
-                        batch_start // self.batch_size // self.checkpoint_every
-                    )
-                    checkpoint_paths.append(checkpoint_path)
-                    
-                    # Reset accumulated data after saving
-                    accumulated_data = {
-                        "prompt": [],
-                        "llm_response": [],
-                        "mlp_activations": [],
-                        "attention_activations": [],
-                        "residual_activations": [],
-                    }
-                    checkpoint_count = 0
+        
         
         self.logger.info("Batch processing complete")
         
-        # Create final dataset
-        if self.checkpoint_every > 0 and output_file_path and checkpoint_paths:
-            # Combine checkpoints if checkpointing was used
-            final_dataset = self._combine_checkpoints(
-                checkpoint_paths, 
-                output_file_path
-            )
-        else:
-            # Create dataset directly from accumulated data
-            final_dataset = Dataset.from_dict(accumulated_data)
+
+        # Create dataset directly from accumulated data
+        # Remove empty lists from accumulated_data
+        accumulated_data = {k: v for k, v in accumulated_data.items() if v}
+        
+        final_dataset = Dataset.from_dict(accumulated_data)
+        
+        if intervention_vectors is not None:
+            hook_manager.remove_hooks()
         
         return final_dataset
     
@@ -414,7 +399,8 @@ class ProbeLlamaModel:
                 generation_output = self.model.generate(
                     **batch_inputs,
                     max_new_tokens=self.max_new_tokens,
-                    use_cache=True
+                    use_cache=True,
+                    do_sample=False
                 )
                 
             # Decode outputs
