@@ -38,8 +38,8 @@ def main():
                 print(f"Row {i} intervention_response:")
                 print(row["intervention_response"])
             print("-" * 80)  # Separator between responses
-            with open(output_file, "a") as f:
-                f.write(f"Row {i} intervention_response: {row['intervention_response']}\n")
+                # with open(output_file, "a") as f:
+                #     f.write(f"Row {i} intervention_response: {row['intervention_response']}\n")
             
     except Exception as e:
         print(f"Error loading or processing dataset: {e}")
