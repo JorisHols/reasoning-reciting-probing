@@ -158,8 +158,8 @@ class ModelInterventionManager:
     """Class to manage model interventions through hooks."""
     
     def __init__(self, model,
-                 intervention_type: Literal["ablation", "addition"] = "addition",
-                 alpha: float = 0.1):
+                 intervention_type: Literal["ablation", "addition"],
+                 alpha: float):
         """
         Initialize the intervention manager.
         
@@ -226,37 +226,41 @@ class ModelInterventionManager:
         def hook(module, input):
             # input is a tuple, we want the first element which is the hidden states
             # input[0] shape: [batch_size, seq_len, hidden_size]
-            hidden_states = input[0]
-            
+            #hidden_states = input[0]            
             # Create a copy of the intervention vector and reshape it to (1, 1, hidden_size)
             # This shape will broadcast correctly to any sequence length
             intervention_vec_copy = intervention_vec.clone().view(1, 1, -1).to(self.device)
             
             # Create a modified input tensor
-            modified_hidden_states = hidden_states.clone()
+            #modified_hidden_states = hidden_states.clone()
             
-            if self.intervention_type == "ablation":
+            #if self.intervention_type == "ablation":
                 # Normalize the intervention vector to get a unit vector
                 # The normalization will broadcast correctly
-                unit_vec = intervention_vec_copy / intervention_vec_copy.norm(dim=-1, keepdim=True)
+            unit_vec = intervention_vec_copy / (intervention_vec_copy.norm(dim=-1, keepdim=True) + 1e-8)
+            unit_vec.to(self.device)
+            unit_vec = unit_vec.to(input[0].dtype)
                 
                 # The multiplication and sum will broadcast correctly to any sequence length
                 # because intervention_vec_copy is (1, 1, hidden_size)
-                projection = (modified_hidden_states * unit_vec).sum(dim=-1, keepdim=True) * unit_vec
+            projection = (input[0] * unit_vec).sum(dim=-1, keepdim=True) * unit_vec
                 
                 # Subtract the projection (scaled by alpha) from all tokens
-                modified_hidden_states = modified_hidden_states - self.alpha * projection
-            elif self.intervention_type == "addition":
-                # The addition will broadcast correctly to any sequence length
-                # because intervention_vec_copy is (1, 1, hidden_size)
-                modified_hidden_states = modified_hidden_states + self.alpha * intervention_vec_copy
-            else:
-                raise ValueError(
-                    f"Invalid intervention type: {self.intervention_type}"
-                )
+            modified_hidden_states = input[0] + self.alpha * projection
+            # elif self.intervention_type == "addition":
+            #     # The addition will broadcast correctly to any sequence length
+            #     # because intervention_vec_copy is (1, 1, hidden_size)
+            #     modified_hidden_states = modified_hidden_states + self.alpha * intervention_vec_copy
+            # else:
+            #     raise ValueError(
+            #         f"Invalid intervention type: {self.intervention_type}"
+            #     )
             
             # Return the modified input tuple
-            return (modified_hidden_states,) + input[1:]
+            if isinstance(input, tuple):
+                input[0][:,:,:] = modified_hidden_states[:,:,:]
+            else:
+                input[:,:,:] = modified_hidden_states[:,:,:]
         
         return hook
     

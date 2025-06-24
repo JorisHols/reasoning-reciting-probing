@@ -4,9 +4,9 @@ import argparse
 import logging
 import os
 
-from kk import KKExperiment
-from chess import ChessExperiment
-
+from code.experiments.kk import KKExperiment
+from code.experiments.chess import ChessExperiment
+from code.experiments.arithmetic import ArithmeticExperiment
 
 def setup_basic_logging():
     """Configure basic logging for all modules."""
@@ -37,7 +37,7 @@ def parse_args():
         "--experiment", 
         type=str, 
         default="kk",
-        choices=["chess", "kk"],
+        choices=["chess", "kk", "arithmetic"],
         help="Type of dataset to use for probing"
     )
 
@@ -69,20 +69,6 @@ def parse_args():
         help="Maximum number of new tokens to generate"
     )
     
-    # parser.add_argument(
-    #     "--checkpoint_every",
-    #     type=int,
-    #     default=25,
-    #     help="Save checkpoint after this many batches"
-    # )
-
-    # Whether to generate response text or just capture activations
-    # parser.add_argument(
-    #     "--no_generate",
-    #     action="store_true",
-    #     help="Don't generate responses, only capture activations"
-    # )
-    
     # Chunking parameters
     parser.add_argument(
         "--chunk_id",
@@ -107,7 +93,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--invervention_vector_path",
+        "--intervention_vector_path",
         type=str,
         default=None,
         help="Path to the intervention vector"
@@ -119,6 +105,14 @@ def parse_args():
         default=0.05,
         help="Alpha for the intervention"
     )
+
+    parser.add_argument(
+        "--base",
+        type=int,
+        default=10,
+        help="Base for the arithmetic experiment"
+    )
+    
     return parser.parse_args()
 
 
@@ -133,17 +127,17 @@ def main():
 
     # Check if the output path exists
     if not os.path.exists(args.output_path):
-        logger.error(f"Output path does not exist: {args.output_path}")
-        raise FileNotFoundError(f"Output path does not exist: {args.output_path}")
+        logger.warning(f"Output path does not exist: {args.output_path}, creating it")
+        # Create output directory if it doesn't exist
+        os.makedirs(args.output_path, exist_ok=True)
     
-    # Check if the input path exists
+    # Check if the input path exists    
     if not os.path.exists(args.input_path):
         logger.error(f"Input path does not exist: {args.input_path}")
         raise FileNotFoundError(f"Input path does not exist: {args.input_path}")
 
 
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_path, exist_ok=True)
+
 
     # Get prompts based on dataset type
     logger.info(f"Setting up experiment: {args.experiment}")
@@ -160,7 +154,17 @@ def main():
             input_path=args.input_path,
             output_path=args.output_path,
             chunk_id=args.chunk_id,
-            chunk_size=args.chunk_size,    )
+            chunk_size=args.chunk_size,
+            )
+        
+    elif args.experiment == "arithmetic":
+        experiment = ArithmeticExperiment(
+            input_path=args.input_path,
+            output_path=args.output_path,
+            chunk_id=args.chunk_id,
+            chunk_size=args.chunk_size,
+            base=args.base,
+        )
     else:  # Default to test prompts
         raise ValueError(f"Dataset {args.experiment} not implemented")
 
@@ -177,7 +181,7 @@ def main():
     elif args.experiment_type == "intervention":
         experiment.run_intervention_study(
             intervention_type="addition",
-            invervention_vector_path=args.invervention_vector_path,
+            intervention_vector_path=args.intervention_vector_path,
             alpha=args.alpha
         )
 
