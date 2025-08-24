@@ -13,15 +13,25 @@ slurm_params = {
     'cpus-per-task': 8,
     'gpus': 1,
     'mem': '32G',
-    'time': '0:20:00'
+    'time': '0:25:00'
 }
 
 # Function to submit a job
 def tune_intervention_dir_job(alpha, layer):
-    if EXPERIMENT == 'GSM-symbolic':
+    if EXPERIMENT == 'gsm-symbolic':
         output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/gsm-symbolic/tuning/"
     elif EXPERIMENT == 'chess':
         output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/chess/tuning/"
+    elif EXPERIMENT == 'programming':
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/programming/tuning/"
+    elif 'base' in EXPERIMENT:
+        base = int(EXPERIMENT.split('base')[1])
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/arithmetic/tuning/{base}/"
+    elif 'combined' in EXPERIMENT:
+        type = EXPERIMENT.split('_', 1)[1]
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/combined_directions/{type}/tuning/"
+    else:
+        raise ValueError(f"Experiment {EXPERIMENT} not found")
 
     os.makedirs(output_dir, exist_ok=True)
     if layer is None:
@@ -56,7 +66,7 @@ def tune_intervention_dir_job(alpha, layer):
     
     if result.returncode == 0:
         job_id = result.stdout.strip().split()[-1]
-        print(f"Submitted job for alpha={alpha}, job ID: {job_id}")
+        print(f"Submitted job for experiment={EXPERIMENT}, alpha={alpha}, layer={layer}, job ID: {job_id}")
         return job_id
     else:
         print(f"Error submitting job for alpha={alpha}: {result.stderr}")
@@ -70,14 +80,18 @@ def tune_intervention_dir_job(alpha, layer):
 
 EXPERIMENT = 'chess'
 
-alpha = 0.1
+job_id = tune_intervention_dir_job(0.1, None)
 
-# job_id = tune_intervention_dir_job(alpha, None)
+# # Uncomment to get the intervention direction for the base model
+# alpha = 0.1
+# job_id = tune_intervention_dir_job(alpha, 9)
 
+# # Uncomment to tune the intervention direction for the best layer
+# alpha = 0.1
 # for layer in range(3, 32):
 #     job_id = tune_intervention_dir_job(alpha, layer)
 #     time.sleep(1)
 
-for alpha in [-0.25, -0.20, -0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15, 0.20, 0.25]:
-    job_id = tune_intervention_dir_job(alpha, 23)
-    time.sleep(1)
+# for alpha in [-0.25, -0.20, -0.15, -0.10, -0.05, 0.00, 0.05, 0.10, 0.15, 0.20, 0.25]:
+#     job_id = tune_intervention_dir_job(alpha, 7)
+#     time.sleep(1)

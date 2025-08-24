@@ -13,32 +13,28 @@ slurm_params = {
     'cpus-per-task': 8,
     'gpus': 1,
     'mem': '32G',
-    'time': '1:00:00'
+    'time': '01:30:00'
 }
 
 # Function to submit a job
 def submit_probe_intervention_chunk_job(alpha, layer, chunk_id):
-
     # Check if base8 directory exists
-    if EXPERIMENT == 'arithmetic':
-        os.makedirs(f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/arithmetic/probe/base{BASE}", exist_ok=True)
-
-        run_dir_name = f"intervention_probe_base{BASE}_alpha_{alpha:.2f}_layer_dofm_{layer}"
-        #run_dir_name = f"base{BASE}_alpha_{alpha:.2f}_layer_dof_{layer}_full_dataset"
-        #run_dir_name = f"base{BASE}_alpha_{alpha:.2f}_respective_diff_of_means"
-        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/arithmetic/probe/base{BASE}/with_intervention"
+    if 'base' in EXPERIMENT:
+        base = int(EXPERIMENT.split('base')[1])
+        run_dir_name = f"base{base}_probe_intervention_alpha_{alpha:.2f}_layer_dofm_{layer}"
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/arithmetic/intervention/base{base}/{INTERVENTION_TYPE}"
     
     elif EXPERIMENT == 'chess':
-        os.makedirs(f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/chess/intervention/", exist_ok=True)
-
         run_dir_name = f"chess_probe_intervention_alpha_{alpha:.2f}_layer_dofm_{layer}"
-        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/chess/intervention/"
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/chess/intervention/{INTERVENTION_TYPE}"
     
-    elif EXPERIMENT == 'GSM-symbolic':
-        os.makedirs(f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/gsm-symbolic/intervention/", exist_ok=True)
-
+    elif EXPERIMENT == 'gsm-symbolic':
         run_dir_name = f"gsm-symbolic_probe_intervention_alpha_{alpha:.2f}_layer_dofm_{layer}"
-        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/gsm-symbolic/intervention/"
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/gsm-symbolic/intervention/{INTERVENTION_TYPE}"
+
+    elif EXPERIMENT == 'programming':
+        run_dir_name = f"programming_probe_intervention_alpha_{alpha:.2f}_layer_dofm_{layer}"
+        output_dir = f"/gpfs/home5/jholshuijsen/reasoning-reciting-probing/outputs/programming/intervention/{INTERVENTION_TYPE}"
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -65,17 +61,18 @@ def submit_probe_intervention_chunk_job(alpha, layer, chunk_id):
     sbatch_cmd += f"--wrap=\"poetry run python {script_path} \
     --alpha {alpha} \
     --layer {layer} \
-    --base {BASE} \
     --run_dir {run_dir_name} \
     --chunk_id {chunk_id} \
     --chunk_size {CHUNK_SIZE} \
-    --experiment {EXPERIMENT}\""
+    --experiment {EXPERIMENT} \
+    --intervention_type {INTERVENTION_TYPE} \
+    --intervention_only yes\"" # Comment out to also run base intervention
     # Submit the job
     result = subprocess.run(sbatch_cmd, shell=True, capture_output=True, text=True)
     
     if result.returncode == 0:
         job_id = result.stdout.strip().split()[-1]
-        print(f"Submitted job for alpha={alpha}, job ID: {job_id}")
+        print(f"Submitted job for alpha={alpha}, layer={layer}, job ID: {job_id}")
         return job_id
     else:
         print(f"Error submitting job for alpha={alpha}: {result.stderr}")
@@ -86,15 +83,39 @@ def submit_probe_intervention_chunk_job(alpha, layer, chunk_id):
 #     if layer in layers:
 #         continue
 
-CHUNK_SIZE = 200
-DATASET_SIZE = 200
-BASE = 10
-EXPERIMENT = 'chess'
+# Set this to larger than larges dataset to avoid chunking
+# DATASET_SIZE = 2000
+CHUNK_SIZE = 2000
+CHUNK_ID = 0
 
-intervention_layer = 9
-alpha = 0.05
-INTERVENTION = False
+EXPERIMENT = 'gsm-symbolic'
+# intervention_args = ('exclusive_chess', 23)
+intervention_args = ('gibberish_chess', 5)
+# intervention_args = ('gibberish_arithmetic', 18)
+# intervention_args = ('exclusive_arithmetic', 9)
+#intervention_args = ('combined_arithmetic_chess_programming', 7)
+INTERVENTION_TYPE = intervention_args[0]
+INTERVENTION_LAYER = intervention_args[1]
+# Define the intervention type and layer
+# intervention_args = ('programming', 9)
+# INTERVENTION_TYPE = intervention_args[0]
+# INTERVENTION_LAYER = intervention_args[1]
 
-for chunk_id in range(DATASET_SIZE // CHUNK_SIZE):
-    job_id = submit_probe_intervention_chunk_job(alpha, intervention_layer, chunk_id)
+INTERVENTION = True
+
+alphas = [-0.25, -0.20, -0.15, -0.10, -0.05, 0.00, 0.05, 0.10, 0.15, 0.20, 0.25]
+for alpha in alphas:
+    job_id = submit_probe_intervention_chunk_job(alpha, INTERVENTION_LAYER, CHUNK_ID)
     time.sleep(1)
+
+# job_id = submit_probe_intervention_chunk_job(0.1, INTERVENTION_LAYER, CHUNK_ID)
+
+
+# # UNCOMMENT TO FIND THE BEST LAYER ON THE TASK
+# for layer in range(3, 32):
+#     job_id = submit_probe_intervention_chunk_job(0.1, layer, CHUNK_ID)
+#     time.sleep(1)
+
+# for chunk_id in range(DATASET_SIZE // CHUNK_SIZE):
+#     job_id = submit_probe_intervention_chunk_job(alpha, intervention_layer, chunk_id)
+#     time.sleep(1)

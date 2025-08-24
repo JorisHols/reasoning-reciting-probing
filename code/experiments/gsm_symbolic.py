@@ -16,7 +16,7 @@ class GSMSymbolicExperiment(ExperimentBase):
         self.logger = logging.getLogger("chess")
         self.model_name = model_name
         self.sample_size = sample_size
-        self.prober = self.setup_probe(model_name=model_name)
+        # self.prober = self.setup_probe(model_name=model_name)
         
         # Create the (chunk) output folder if it doesn't exist
         # It will be stored under output/run_id/chunk_id/data
@@ -53,9 +53,9 @@ class GSMSymbolicExperiment(ExperimentBase):
         Q: {TARGET_QUESTION}
         A: Let's think step by step. """
 
-    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, collect_activations: bool = False, seed: int = 8888):
+    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, collect_activations: bool = False, seed: int = 8888, test_set: bool = False, save_activations: bool = False):
         """Collect the activations of the probe model for the chess data."""
-        data = self.load_data(ds_name='GSM-symbolic', sample_size=self.sample_size, seed=seed)
+        data = self.load_data(ds_name='GSM-symbolic', sample_size=self.sample_size, seed=seed, test_set=test_set)
         # Check if the probe is already set up
 
         if self.prober is None:
@@ -75,7 +75,7 @@ class GSMSymbolicExperiment(ExperimentBase):
 
         try:
             # If we're collecting activations we want to save them for further analysis
-            if collect_activations:
+            if save_activations:
                 dataset.save_to_disk(self.output_path)
                 self.logger.info(f"Results saved to {self.output_path}")
             return dataset
@@ -129,7 +129,7 @@ class GSMSymbolicExperiment(ExperimentBase):
         return parsed_responses
          
 
-    def evaluate_llm_responses(self, dataset: Dataset, seed: int = 8888):
+    def evaluate_llm_responses(self, dataset: Dataset, seed: int = 8888, test_set: bool = False):
         """Evaluate the LLM responses on the chess data.
         
         Returns:
@@ -138,7 +138,7 @@ class GSMSymbolicExperiment(ExperimentBase):
             incorrect_prediction_indices: list[int]
         """
         predictions = self.parse_llm_response(dataset)
-        data = self.load_data(ds_name='GSM-symbolic', sample_size=self.sample_size, seed=seed)
+        data = self.load_data(ds_name='GSM-symbolic', sample_size=self.sample_size, seed=seed, test_set=test_set)
         correct_prediction_indices = []
         incorrect_prediction_indices = []
         total_predictions = len(predictions)
@@ -155,7 +155,7 @@ class GSMSymbolicExperiment(ExperimentBase):
 
 
     
-    def load_data(self, ds_name, sample_size: int, seed: int) -> list[dict]:
+    def load_data(self, ds_name, sample_size: int, seed: int, test_set: bool = False) -> list[dict]:
         """Load GSM data from a jsonl file at the input path and return a list of dictionaries."""
         def extract_final_answer(model_resp: str) -> float:
             # Remove commas so for example 5,000 becomes 5000
@@ -174,11 +174,35 @@ class GSMSymbolicExperiment(ExperimentBase):
             for entry in ds_data:
                 entry['final_answer'] = extract_final_answer(model_resp=entry['answer'])
 
-        if sample_size is not None:
-            # Randomly sample the data
-            random.seed(8888)
-            ds_data = random.sample(ds_data, sample_size)
 
+        # FOR BACKWARD COMPATIBILITY - EXCLUDE ALL VALUES JUST SAMPLED FROM TEST SET (AS WE VALIDATED ON THIS SET)
+        # AND SAMPLE 400 NEW ONES (WITH DIFFERENT SEED, TO CREATE TEST SET)
+        if test_set:
+            # First, get the validation set indices (using the same seed as validation)
+            random.seed(seed)
+            validation_indices = set(range(len(ds_data)))
+            if sample_size is not None and sample_size < len(ds_data):
+                sampled_validation = random.sample(ds_data, sample_size)
+                # Find indices of validation samples in original data
+                validation_indices = set()
+                for val_item in sampled_validation:
+                    for i, item in enumerate(ds_data):
+                        if item['question'] == val_item['question']:  # Assuming questions are unique
+                            validation_indices.add(i)
+                            break
+            
+            # Create test set by excluding validation indices
+            remaining_data = [ds_data[i] for i in range(len(ds_data)) if i not in validation_indices]
+            
+            # Sample 400 new ones with a different seed for test set
+            random.seed(seed)  # Different seed from validation (8888)
+            test_sample_size = min(400, len(remaining_data))
+            ds_data = random.sample(remaining_data, test_sample_size)
+        elif sample_size is not None:
+            # Randomly sample the data
+            random.seed(seed)
+            ds_data = random.sample(ds_data, sample_size)
+ 
         return ds_data
 
 

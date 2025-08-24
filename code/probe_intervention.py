@@ -49,7 +49,7 @@ def get_indices(llm_responses, expressions, base):
 def get_diff_means_all_layers(base, base_indices, selected_base_10_indices):
     """Loads the activations for the base and calculates the diff of means for all layers"""
     print(f'****Loading activations for base: {base}')
-    input_path = f'./code/probes/notebooks/utils/Llama-3.1-8B/base{base}/'
+    input_path = f'./notebooks/notebooks/utils/Llama-3.1-8B/base{base}/'
     layer_wise_activations = pickle.load(open(input_path + f'layer_activations_base{base}.pkl', 'rb'))
 
 
@@ -76,8 +76,74 @@ def format_intervention_vectors(layer_diff_means):
     intervention_vectors[:3] = torch.zeros(3, 4096)
     return intervention_vectors
 
+def save_intervention_result(experiment, intervention_type, alpha, layer, result_data, mode):
+    """
+    Save intervention result to a structured JSON file organized by experiment, intervention type, and layer
+    
+    Args:
+        experiment: str - experiment name (e.g., 'chess', 'base8', etc.)
+        intervention_type: str - type of intervention
+        alpha: float - intervention strength
+        layer: int - layer number
+        result_data: dict - experiment-specific results to save
+    """
+    import json
+    import os
+    
+    # Create unique ID for this specific alpha configuration
+    config_id = f"alpha{alpha}"
+    
+    # Create the result object
+    result = {
+        'alpha': alpha,
+        'layer': layer,
+        'config_id': config_id,
+        **result_data  # Merge in experiment-specific data
+    }
+    if intervention_type == 'liref':
+        mode = 'liref'
+    elif intervention_type in ['exclusive_chess', 'gibberish_chess', 'exclusive_arithmetic', 'gibberish_arithmetic']:
+        mode = intervention_type.split('_')[0]
+    # Load existing results structure
+    results_file = f'./outputs/{experiment}/results/{mode}/intervention_results.json'
+     # Ensure output directory exists
+    os.makedirs(f'./outputs/{experiment}/results/{mode}/', exist_ok=True)
+    if os.path.exists(results_file):
+        try:
+            with open(results_file, 'r') as f:
+                all_results = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            print(result_data)
+            raise ValueError(f"Warning: {results_file} exists but contains invalid JSON. Starting with empty structure.")
+    else:
+        all_results = {}
+    
+    # Initialize nested structure if needed
+    if experiment not in all_results:
+        all_results[experiment] = {}
+    if intervention_type not in all_results[experiment]:
+        all_results[experiment][intervention_type] = {}
+    if str(layer) not in all_results[experiment][intervention_type]:
+        all_results[experiment][intervention_type][str(layer)] = {}
+    
+    # Check if this configuration already exists
+    if config_id in all_results[experiment][intervention_type][str(layer)]:
+        print(f"Overwriting existing result for {experiment} -> {intervention_type} -> layer{layer} -> {config_id}")
+    else:
+        print(f"Adding new result for {experiment} -> {intervention_type} -> layer{layer} -> {config_id}")
+    
+    # Save the result
+    all_results[experiment][intervention_type][str(layer)][config_id] = result
+    
+   
+    # Save back to file with pretty formatting
+    with open(results_file, 'w') as f:
+        json.dump(all_results, f, indent=2, sort_keys=True)
+    
+    return result
 
-def collect_activations_for_intervention(layer, alpha, intervention_type):
+
+def collect_activations_for_intervention(layer, alpha, intervention_type, mode='counter_factual'):
     """
     Runs the intervention experiment for the difference of means vector for a given layer and alpha
 
@@ -85,36 +151,8 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
     """
 
     if INTERVENTION:
-        if 'base' in intervention_type:
-            print(f'****Running on difference of means vector for layer: {layer} with alpha: {alpha}')
-            # Load the data
-            intervention_base = intervention_type.split('base')[1]
-
-            input_path = f'./code/probes/notebooks/utils/Llama-3.1-8B/{intervention_type}/'
-
-            llm_responses = pickle.load(open(input_path + f'llm_responses_{intervention_type}.pkl', 'rb'))
-            expressions = pickle.load(open(input_path + f'expressions_{intervention_type}.pkl', 'rb'))
-
-            base_indices, base10_indices, other_indices = get_indices(llm_responses, expressions, intervention_base)
-            
-            print(f'****{intervention_type} indices: {len(base_indices)}')
-            print(f'****Base10 indices: {len(base10_indices)}')
-            print(f'****Other indices: {len(other_indices)}')
-
-            selected_base_10_indices = random.sample(base10_indices, len(base_indices))
-            
-            # Get diff of means vector for all layers
-            layerwise_diff_means = get_diff_means_all_layers(intervention_base, base_indices, selected_base_10_indices)
-            
-
-            print(f'****Candidate directions calculated')
-            print("Shape of candidate directions: ", layerwise_diff_means.shape)
-
-            # Format the intervention vectors
-            intervention_vectors = format_intervention_vectors(layerwise_diff_means[layer])
-
-        elif intervention_type in ['chess', 'gsm-symbolic']:
-            results_path = f'./outputs/{intervention_type}/tuning/'
+        if intervention_type in ['chess', 'gsm-symbolic', 'programming', 'arithmetic']:
+            results_path = f'./outputs/{intervention_type}/tuning/{mode}/'
             # load the directions
             print(f'**** Loading diff means directions')
             layer_wise_diff_means = torch.load(results_path+'diff_means_directions.pth')
@@ -124,12 +162,40 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
 
             print(f'**** Formatting intervention vectors')
             intervention_vectors = format_intervention_vectors(intervention_direction)
-        
-    if 'base' in EXPERIMENT:
+
+        elif 'combined_' in intervention_type:
+            vector = intervention_type.split('combined_')[1]
+            results_path = f'./outputs/combined_directions/{mode}/'
+
+            print(f'**** Loading intervention vectors for {vector}')
+            layer_wise_diff_means = torch.load(results_path+f'diff_means_directions_{vector}.pth')
+            # Select the layer
+            intervention_direction = layer_wise_diff_means[layer]
+
+            print(f'**** Formatting intervention vectors')
+            intervention_vectors = format_intervention_vectors(intervention_direction)
+        elif intervention_type == 'liref':
+            print(f'**** Loading intervention vectors for liref')
+            layer_wise_diff_means = torch.load('./outputs/liref/tuning/diff_means_directions.pth')
+            intervention_direction = layer_wise_diff_means[layer]
+            print(f'**** Formatting intervention vectors')
+            intervention_vectors = format_intervention_vectors(intervention_direction)
+        elif intervention_type in ['exclusive_chess', 'gibberish_chess', 'exclusive_arithmetic', 'gibberish_arithmetic']:
+            type = intervention_type.split('_')[0]
+            task = intervention_type.split('_')[1]
+            print(f'**** Loading intervention vectors for {type}')
+            results_path = f'./outputs/{task}/tuning/{type}/'
+            layer_wise_diff_means = torch.load(results_path+f'diff_means_directions.pth')
+            intervention_direction = layer_wise_diff_means[layer]
+            print(f'**** Formatting intervention vectors')
+            intervention_vectors = format_intervention_vectors(intervention_direction)
+
+    if EXPERIMENT == 'base8':
     # Load the arithmetic experiment
-        base = EXPERIMENT.split('base')[1]
+        base = int(EXPERIMENT.split('base')[1])
 
         output_path = f'./outputs/arithmetic/probe/base{base}/with_intervention/{RUN_DIR}/chunks/{CHUNK_ID}/'
+        #output_path = f'./outputs/arithmetic/logit_lens/base{base}/combine_intervention/'
         os.makedirs(output_path, exist_ok=True)
         # Get the digit from the experiment name
         experiment = ArithmeticExperiment(
@@ -154,6 +220,19 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
 
             print(f'****Accuracy: {accuracy}')
             print(f'****Real world accuracy: {len(real_world_indices) / len(dataset)}')
+
+            result_data = {
+                'accuracy': accuracy,
+                'real_world_accuracy': len(real_world_indices) / len(dataset),
+                'alpha': alpha,
+                'layer': layer,
+                'base': base,
+                'intervention_type': intervention_type,
+                'experiment': EXPERIMENT,
+                'correct_indices': correct_indices,
+            }
+            save_intervention_result(EXPERIMENT, intervention_type, alpha, layer, result_data, mode)
+
         
         return
 
@@ -206,8 +285,20 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
             print(f"Counterfactual accuracy: {counter_factual_accuracy}")
             print(f"Number of counterfactual instances: {num_counter_factual_instances}")
 
+            result_data = {
+                'real_world_accuracy': rw_accuracy,
+                'counterfactual_accuracy': counter_factual_accuracy,
+                'num_rw_instances': num_rw_instances,
+                'num_counter_factual_instances': num_counter_factual_instances,
+                'alpha': alpha,
+                'layer': layer,
+                'intervention_type': intervention_type,
+                'experiment': EXPERIMENT                
+            }
+            save_intervention_result(EXPERIMENT, intervention_type, alpha, layer, result_data, mode)
+
         return
-    elif EXPERIMENT == 'GSM-symbolic':
+    elif EXPERIMENT == 'gsm-symbolic':
         sample_size = 400
         output_path = f'./outputs/gsm-symbolic/intervention/{RUN_DIR}/chunks/{CHUNK_ID}/'
         os.makedirs(output_path, exist_ok=True)
@@ -228,9 +319,55 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
                 collect_activations=COLLECT_ACTIVATIONS,
             )
 
-
             reason_accuracy, _, _ = experiment.evaluate_llm_responses(dataset)
             print(f"Reason accuracy: {reason_accuracy:.4f}")
+
+        if INTERVENTION:
+            test_set = False
+            print("**** Running experiment WITH intervention")
+            # Run the experiment with intervention
+            dataset = experiment.run_experiment(
+                intervention_vectors=intervention_vectors,
+                alpha=alpha,
+                collect_activations=COLLECT_ACTIVATIONS,
+                test_set=test_set
+            )
+
+            reason_accuracy, _, _ = experiment.evaluate_llm_responses(dataset, test_set=test_set)
+            print(f"Reason accuracy: {reason_accuracy:.4f}")
+
+            result_data = {
+                'reason_accuracy': reason_accuracy,
+                'alpha': alpha,
+                'layer': layer,
+                'intervention_type': intervention_type,
+                'experiment': EXPERIMENT,
+                'test_set': test_set
+            }
+            save_intervention_result(EXPERIMENT, intervention_type, alpha, layer, result_data, mode)
+
+    elif EXPERIMENT == 'programming':
+        print(f"Running experiment for programming")
+        output_path = f'./outputs/programming/intervention/{RUN_DIR}/chunks/{CHUNK_ID}/'
+        os.makedirs(output_path, exist_ok=True)
+
+        experiment = ProgrammingExperiment(
+            input_path=f'./inputs/programming/',
+            output_path=output_path,
+            chunk_size=CHUNK_SIZE,
+            chunk_id=CHUNK_ID,
+            model_name='meta-llama/Llama-3.1-8B',
+            mode='counter_factual',
+        )
+
+        if not INTERVENTION_ONLY:
+            print("**** Running experiment WITHOUT intervention")
+            # Run the experiment wthout intervention
+            dataset = experiment.run_experiment(
+                collect_activations=COLLECT_ACTIVATIONS,
+            )
+            pass_at_k_result, _, _ = experiment.evaluate_llm_responses(dataset)
+            print(f"Pass@1 for index_from={1 if experiment.mode == 'counter_factual' else 0}: {pass_at_k_result['pass@1']}")
 
         if INTERVENTION:
             print("**** Running experiment WITH intervention")
@@ -238,12 +375,17 @@ def collect_activations_for_intervention(layer, alpha, intervention_type):
             dataset = experiment.run_experiment(
                 intervention_vectors=intervention_vectors,
                 alpha=alpha,
-                collect_activations=COLLECT_ACTIVATIONS,
             )
-
-            reason_accuracy = experiment.evaluate_llm_responses(dataset)
-            print(f"Reason accuracy: {reason_accuracy:.4f}")
-
+            pass_at_k_result, _, _ = experiment.evaluate_llm_responses(dataset)
+            print(f"**** INTERVENTION RESULT:Pass@1 for index_from={1 if experiment.mode == 'counter_factual' else 0}: {pass_at_k_result['pass@1']}")
+            result_data = {
+                'pass@1': pass_at_k_result['pass@1'],
+                'alpha': alpha,
+                'layer': layer,
+                'intervention_type': intervention_type,
+                'experiment': EXPERIMENT                
+            }
+            save_intervention_result(EXPERIMENT, intervention_type, alpha, layer, result_data, mode)
         return
 
 if __name__ == "__main__":
@@ -290,10 +432,10 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(8888)
         torch.cuda.manual_seed_all(8888)
 
-    from probe_llama import ProbeLlamaModel
     from experiments.arithmetic import ArithmeticExperiment
     from experiments.chess import ChessExperiment
     from experiments.gsm_symbolic import GSMSymbolicExperiment
+    from experiments.programming import ProgrammingExperiment
     import utils.arithmetic_utils as arithmetic_utils
 
     
@@ -314,12 +456,14 @@ if __name__ == "__main__":
     CHUNK_ID = args.chunk_id
     CHUNK_SIZE = args.chunk_size
     INTERVENTION = True
-    COLLECT_ACTIVATIONS = False
+    SAVE_ACTIVATIONS = True
+    COLLECT_ACTIVATIONS = True
     INTERVENTION_ONLY = args.intervention_only
     # Experiment settings
     EXPERIMENT = args.experiment
     INTERVENTION_TYPE = args.intervention_type
-    accuracies = collect_activations_for_intervention(args.layer, args.alpha, intervention_type=INTERVENTION_TYPE)
+    INTERVENTION_MODE = 'counter_factual'
+    accuracies = collect_activations_for_intervention(args.layer, args.alpha, intervention_type=INTERVENTION_TYPE, mode=INTERVENTION_MODE)
 
 
 

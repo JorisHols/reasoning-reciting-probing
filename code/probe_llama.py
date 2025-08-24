@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 import os
 import logging
 
-import probe_utils
-from probe_utils import ModelInterventionManager
+from utils import probe_utils
+from utils.probe_utils import ModelInterventionManager
 
 
 class ProbeLlamaModel:
@@ -393,7 +393,6 @@ class ProbeLlamaModel:
             
             batch_inputs = self._tokenize_batch(batch_prompts=batch_prompts)
             
-
             # Run generation with ablation
             with torch.no_grad():
                 generation_output = self.model.generate(

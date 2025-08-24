@@ -4,20 +4,21 @@ import torch
 
 from probe_llama import ProbeLlamaModel
 class ExperimentBase:
-    def __init__(self, input_path: str, output_path: str, chunk_size: int, chunk_id: int):
+    def __init__(self, input_path: str, output_path: str, chunk_size: int, chunk_id: int, model_name: str = "meta-llama/Llama-3.1-8B"):
         self.input_path = input_path
         self.output_path = output_path
         self.chunk_size = chunk_size
         self.chunk_id = chunk_id
+        self.model_name = model_name
+        self.prober = None
+
 
         
     def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, collect_activations: bool = False) -> Dataset:
         data = self.load_data()
         # Check if the probe is already set up
-
         if self.prober is None:
             self.setup_probe()
-
 
         prompts = self.format_prompts(data)
         dataset = self.prober.process_statements(

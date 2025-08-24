@@ -3,18 +3,18 @@ import os
 import logging
 import torch
 import random
+import string
 from typing import Literal
 
 from datasets import Dataset
 from probe_llama import ProbeLlamaModel
 from .experiment_base import ExperimentBase
 
-
 class ChessExperiment(ExperimentBase):
     def __init__(self, input_path: str, output_path: str, chunk_size: int, chunk_id: int, model_name: str = "meta-llama/Llama-3.1-8B", seed: int = 8888):
         super().__init__(input_path, output_path, chunk_size, chunk_id)
         self.logger = logging.getLogger("chess")
-        self.prober = self.setup_probe(model_name=model_name)
+        # self.prober = self.setup_probe(model_name=model_name)
         self.model_name = model_name
         self.seed = seed
         # Create the (chunk) output folder if it doesn't exist
@@ -29,7 +29,7 @@ class ChessExperiment(ExperimentBase):
             "{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
         )
 
-    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, attach_control_prompts: bool = True, collect_activations: bool = True):
+    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, attach_control_prompts: bool = True, collect_activations: bool = True, gibberish = False, save_activations: bool = False):
         """Collect the activations of the probe model for the chess data."""
         data = self.load_data()
         # Check if the probe is already set up
@@ -50,7 +50,14 @@ class ChessExperiment(ExperimentBase):
 
             dataset = self._combine_results_with_input(dataset, data)
         else:
-            prompts = self.format_prompts(data)
+            if gibberish:
+                # Use th rw data to create gibberish examples
+                cf_data, rw_data = [d for d in data if d['mode'] == 'counter_factual'], [d for d in data if d['mode'] == 'real_world']
+                prompts = self.format_prompts(rw_data, gibberish=True)
+                prompts.extend(self.format_prompts(cf_data, gibberish=False))
+            else:
+                prompts = self.format_prompts(data)
+
             dataset = self.prober.process_statements(
                 prompts, 
                 self.output_path, 
@@ -61,7 +68,7 @@ class ChessExperiment(ExperimentBase):
         
         try:
             # If we're collecting activations we want to save them for further analysis
-            if collect_activations:
+            if save_activations:
                 dataset.save_to_disk(self.output_path)
                 self.logger.info(f"Results saved to {self.output_path}")
                 return dataset
@@ -283,7 +290,7 @@ class ChessExperiment(ExperimentBase):
         return dataset
 
 
-    def format_prompts(self, data: list):
+    def format_prompts(self, data: list , gibberish: bool = False):
         """Format the prompts for the probe model."""
         def format_prompt(opening: str, mode: str):
             if mode == "real_world":
@@ -293,6 +300,63 @@ class ChessExperiment(ExperimentBase):
         
             prompt = "### Question: \n" + user_prompt + "\n"
             prompt += "### Answer: \n"
+            return prompt
+        
+        def format_gibberish_prompt(opening: str, mode: str):            
+            def generate_random_gibberish_opening(seed_value):
+                """Generate a random gibberish opening with 20 random characters"""
+                random.seed(seed_value)
+                # Mix of letters, numbers, and some chess-like symbols
+                chars = string.ascii_letters + string.digits + "+-=()[]{}*"
+                return ''.join(random.choice(chars) for _ in range(20))
+            
+            def generate_random_label(seed_value):
+                """Generate a random Yes/No label"""
+                random.seed(seed_value + 12345)  # Different seed for labels
+                return random.choice([True, False])
+            
+            def create_gibberish_examples(num_examples=8):
+                """Create random gibberish chess opening examples"""
+                examples = []
+                
+                # Use the opening string as base for deterministic randomness
+                base_seed = hash(opening) % 1000000
+                
+                for i in range(num_examples):
+                    seed_val = base_seed + i * 7  # Different seed for each example
+                    
+                    gibberish_opening = generate_random_gibberish_opening(seed_val)
+                    label = generate_random_label(seed_val)
+                    
+                    examples.append({
+                        'opening': gibberish_opening,
+                        'label': 'Yes' if label else 'No',
+                    })
+                
+                return examples
+            
+            # Convert the actual opening to gibberish too
+            gibberish_target_opening = generate_random_gibberish_opening(hash(opening) % 1000000 + 999)
+
+            prompt = "You are a chess player."
+            if mode == "counter_factual":
+                prompt += (" You are playing a chess variant where the starting positions"
+                          " for knights and bishops are swapped. For each color, the knights"
+                          " are at placed that where bishops used to be and the bishops"
+                          " are now placed at where knights used to be.")
+            
+            prompt += " Given an opening, determine whether the opening is legal. The opening doesn't need to be a good opening."
+            prompt += "\n\nExamples:\n"
+
+            # Generate gibberish examples
+            examples = create_gibberish_examples(8)
+            
+            for example in examples:
+                prompt += f"Opening: {example['opening']}\n"
+                prompt += f"Answer: {example['label']}\n\n"
+
+            prompt += f"Opening: {gibberish_target_opening}\n"
+            prompt += "Answer: "
             return prompt
         
         def format_llama_base_prompt(opening: str, mode: str, examples: list):
@@ -334,8 +398,11 @@ class ChessExperiment(ExperimentBase):
                 system_prompt = self._create_system_prompt(line["mode"])
                 prompts.append(self.TEMPLATE.format(system_prompt=system_prompt, prompt=user_prompt))
             else:
-                examples = sample_examples(line["opening"], data)
-                prompt = format_llama_base_prompt(line["opening"], line["mode"], examples)
+                if gibberish:
+                    prompt = format_gibberish_prompt(line["opening"], line["mode"])
+                else:
+                    examples = sample_examples(line["opening"], data)
+                    prompt = format_llama_base_prompt(line["opening"], line["mode"], examples)
                 prompts.append(prompt)
 
 

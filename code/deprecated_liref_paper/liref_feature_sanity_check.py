@@ -206,6 +206,11 @@ def run_intervention_experiment_from_liref_paper(alpha):
     )
     print(f'****Candidate directions calculated')
 
+    diff_means_directions_cpu = candidate_directions.cpu().float()
+    torch.save(diff_means_directions_cpu, './outputs/liref/tuning/diff_means_directions.pth')
+
+    return
+
     ds_name = 'GSM-symbolic'
     dataset_dir = "./inputs/liref"
 

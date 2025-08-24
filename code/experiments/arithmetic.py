@@ -1,6 +1,7 @@
 """Class for collecting the dat (activations and intervention responses) 
 for the arithmetic experiment. Further analysis is done in a notebook"""
 
+import hashlib
 import json
 import os
 import logging
@@ -17,7 +18,7 @@ class ArithmeticExperiment(ExperimentBase):
     def __init__(self, input_path: str, output_path: str, chunk_size: int, chunk_id: int, base: int = 10):
         super().__init__(input_path, output_path, chunk_size, chunk_id)
         self.logger = logging.getLogger("arithmetic")
-        self.prober = self.setup_probe()
+        # self.prober = self.setup_probe()
         self.base = base
         
         # Create the (chunk) output folder if it doesn't exist
@@ -32,7 +33,7 @@ class ArithmeticExperiment(ExperimentBase):
             "{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
         )
 
-    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, collect_activations: bool = False):
+    def run_experiment(self, intervention_vectors: list[torch.Tensor] = None, alpha: float = 0.0, collect_activations: bool = False, mode: Literal["real_world", "counter_factual"] = "counter_factual", gibberish: bool = False, save_activations: bool = False):
         """Collect the activations of the probe model for the chess data."""
         data = self.load_data()
         # Check if the probe is already set up
@@ -48,17 +49,34 @@ class ArithmeticExperiment(ExperimentBase):
 
         # else:
         prompts = self.format_prompts(data)
+
+        if mode == "real_world" or gibberish:
+            gibberish_prompts = self._format_gibberish_prompt(data)
+            prompts.extend(gibberish_prompts)
+
+            # add 1000 empty dicts to the data for the gibberish problems
+            data.extend([{"gibberish": True} for _ in range(len(gibberish_prompts))])
+
+            for item in data:
+                if not item.get('gibberish'):
+                    item['gibberish'] = False
+                if not item.get('expr'):
+                    item['expr'] = 'gibberish'
+                if not item.get('base'):
+                    item['base'] = self.base
+            
         dataset = self.prober.process_statements(
             prompts, 
             self.output_path, 
             intervention_vectors, 
-            alpha
+            alpha,
+            collect_activations=collect_activations
         )
         
         dataset = self._combine_results_with_input(dataset, data)
 
         try:
-            if collect_activations:
+            if save_activations:
                 dataset.save_to_disk(self.output_path)
                 self.logger.info(f"Results saved to {self.output_path}")
                 return dataset
@@ -117,12 +135,31 @@ class ArithmeticExperiment(ExperimentBase):
         for line in data:
             for k, v in line.items():
                 new_columns[k].append(v)
-
         # Add the new columns to the dataset
         for k, v in new_columns.items():
             dataset = dataset.add_column(k, v)
 
         return dataset
+    
+    def _format_gibberish_prompt(self, data: list):
+        prompts = []
+        
+        def generate_deterministic_gibberish(index, suffix="a"):
+            """Generate deterministic gibberish based on index"""
+            # Create a hash of the index to get consistent but meaningless strings
+            hash_input = f"gibberish_{index}_{suffix}".encode()
+            hash_result = hashlib.md5(hash_input).hexdigest()[:6]  # Take first 6 chars
+            return hash_result
+        
+        digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        system_prompt = f"You are a mathematician. Assuming that all numbers are in base-{self.base}, where the digits are \"{digits[:self.base]}\"."
+        for i, line in enumerate(data):
+            gibb_one = generate_deterministic_gibberish(i, "first")
+            gibb_two = generate_deterministic_gibberish(i, "second")
+            prompt = system_prompt + f"\nThe following is a correct addition problem.\n{gibb_one}+{gibb_two}="
+            prompts.append(prompt)
+        
+        return prompts
 
 
     def format_prompts(self, data: list):
@@ -132,6 +169,7 @@ class ArithmeticExperiment(ExperimentBase):
             prompt = "### Question: \n" + user_prompt + "\n"
             prompt += "### Answer: \n"
             return prompt
+        
         
         def format_prompt_llama_base(expr: str):
             # Prompt adapted from https://arxiv.org/pdf/2502.00873
